@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Perimeter Intrusion Detection Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Offline ESP-NOW Security Mesh</p>
+        <h1>AI Perimeter Intrusion Detection Network</h1>
+        <p class="hero-copy">
+          Four distributed ESP nodes fuse PIR, vibration, and ultrasonic signals to detect intrusions,
+          infer travel direction, classify the source offline, and escalate threat levels without internet.
+        </p>
+      </div>
+
+      <div class="hero-card">
+        <span class="status-dot"></span>
+        <p>Gateway Mode</p>
+        <strong>Local Rule Engine Active</strong>
+        <small>No cloud dependency for alerts or first-level classification</small>
+      </div>
+    </section>
+
+    <section class="metrics-grid" aria-label="System metrics">
+      <article class="metric">
+        <span>Total Nodes</span>
+        <strong>4</strong>
+        <small>South gateway, West, North, East</small>
+      </article>
+      <article class="metric">
+        <span>Communication</span>
+        <strong>ESP-NOW</strong>
+        <small>Router-less peer-to-peer mesh</small>
+      </article>
+      <article class="metric danger">
+        <span>Current Threat</span>
+        <strong id="currentThreat">HIGH</strong>
+        <small id="currentClass">Human, 78% confidence</small>
+      </article>
+      <article class="metric">
+        <span>Latest Direction</span>
+        <strong id="currentDirection">EAST -> WEST</strong>
+        <small>Derived from event path</small>
+      </article>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel map-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Live Perimeter</p>
+            <h2>Node Activity Map</h2>
+          </div>
+          <span class="pill">50 cm threshold</span>
+        </div>
+
+        <div class="perimeter-map">
+          <div class="node north active" data-node="NORTH">
+            <span>N3</span>
+            <strong>North</strong>
+          </div>
+          <div class="node west active" data-node="WEST">
+            <span>N2</span>
+            <strong>West</strong>
+          </div>
+          <div class="gateway">
+            <span>Gateway</span>
+            <strong>Node 1 South</strong>
+          </div>
+          <div class="node east" data-node="EAST">
+            <span>N4</span>
+            <strong>East</strong>
+          </div>
+          <div class="node south active" data-node="SOUTH">
+            <span>N1</span>
+            <strong>South</strong>
+          </div>
+          <svg class="path-line" viewBox="0 0 500 380" aria-hidden="true">
+            <path d="M420 190 C360 205, 300 240, 250 300 C210 250, 155 210, 80 190" />
+          </svg>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Rule Classification</p>
+            <h2>Offline Decision Stack</h2>
+          </div>
+        </div>
+
+        <div class="rule-stack">
+          <div>
+            <span>Vehicle</span>
+            <p>Fast multi-node path, high vibration, critical alert.</p>
+          </div>
+          <div>
+            <span>Human</span>
+            <p>Sequential multi-node PIR-heavy movement over moderate duration.</p>
+          </div>
+          <div>
+            <span>Animal</span>
+            <p>Shorter one/two-node movement, lower alert level, moderate distance.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Latest Incident</p>
+            <h2>Incident Summary</h2>
+          </div>
+          <span class="pill alert">Level <span id="alertLevel">3</span></span>
+        </div>
+
+        <dl class="incident-list">
+          <div><dt>Path</dt><dd id="incidentPath">EAST -> SOUTH -> WEST</dd></div>
+          <div><dt>Duration</dt><dd id="incidentDuration">4.2 sec</dd></div>
+          <div><dt>Nodes</dt><dd id="incidentNodes">3 active</dd></div>
+          <div><dt>Min Distance</dt><dd id="incidentDistance">18 cm</dd></div>
+          <div><dt>Sensor Evidence</dt><dd id="incidentEvidence">PIR 11 / VIB 7</dd></div>
+        </dl>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Dataset Foundation</p>
+            <h2>Incident Log</h2>
+          </div>
+          <button id="loadDemo" type="button">Reload demo data</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Direction</th>
+                <th>Classification</th>
+                <th>Threat</th>
+                <th>Confidence</th>
+                <th>Alert</th>
+                <th>Path</th>
+              </tr>
+            </thead>
+            <tbody id="incidentRows"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Serial Bridge Ready</p>
+            <h2>Paste Gateway JSON</h2>
+          </div>
+          <button id="addIncident" type="button">Add incident</button>
+        </div>
+        <textarea id="jsonInput" spellcheck="false">{"time":"00:12:44","direction":"EAST -> WEST","path":"EAST -> SOUTH -> WEST","classification":"HUMAN","threat":"HIGH","confidence":78,"alertLevel":3,"durationSec":4.2,"nodeCount":3,"pirCount":11,"vibCount":7,"minDistance":18}</textarea>
+        <p class="hint">Copy the JSON part printed by the ESP32 gateway after <code>JSON :</code>. A future Flask bridge can push the same payload automatically.</p>
+      </article>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -14,6 +14,8 @@
 #define PATH_TIMEOUT_MS 10000
 #define MAX_EVENTS      10
 #define MAX_INCIDENTS   10
+#define CLASS_NAME_SIZE  12
+#define THREAT_NAME_SIZE 12
 
 typedef struct
 {
@@ -38,9 +40,24 @@ struct Event
 struct Incident
 {
   unsigned long time;
+  unsigned long durationMs;
   uint8_t startNode;
   uint8_t endNode;
+  uint8_t nodeCount;
+  uint8_t pirCount;
+  uint8_t vibCount;
   uint8_t maxAlert;
+  float minDistance;
+  char classification[CLASS_NAME_SIZE];
+  char threat[THREAT_NAME_SIZE];
+  uint8_t confidence;
+};
+
+struct RuleResult
+{
+  const char *classification;
+  const char *threat;
+  uint8_t confidence;
 };
 
 Event eventBuffer[MAX_EVENTS];
@@ -50,9 +67,14 @@ uint8_t incidentPathLengths[MAX_INCIDENTS];
 
 int eventIndex = 0;
 int lastRecordedNode = -1;
+unsigned long pathStartTime = 0;
 unsigned long lastPathEventTime = 0;
 int incidentIndex = 0;
 uint8_t pathMaxAlertLevel = 0;
+uint8_t pathPirCount = 0;
+uint8_t pathVibCount = 0;
+uint8_t pathNodeMask = 0;
+float pathMinDistance = 999;
 
 unsigned long westLastSeen = 0;
 unsigned long northLastSeen = 0;
@@ -73,6 +95,14 @@ bool prevWestActive  = false;
 bool prevNorthActive = false;
 bool prevEastActive  = false;
 int currentAlertLevel = 0;
+
+void copyText(char *target,
+              const char *source,
+              size_t targetSize)
+{
+  strncpy(target, source, targetSize - 1);
+  target[targetSize - 1] = '\0';
+}
 
 String formatMillisTime(unsigned long timeMs)
 {
@@ -124,6 +154,124 @@ bool nodeActive(SensorData node)
   );
 }
 
+uint8_t countPathNodes(uint8_t nodeMask)
+{
+  uint8_t count = 0;
+
+  for(uint8_t i = 0; i < 4; i++)
+  {
+    if(nodeMask & (1 << i))
+      count++;
+  }
+
+  return count;
+}
+
+String pathToString(uint8_t incidentSlot)
+{
+  String path = "";
+
+  for(int i = 0; i < incidentPathLengths[incidentSlot]; i++)
+  {
+    path += nodeName(incidentPaths[incidentSlot][i]);
+
+    if(i < incidentPathLengths[incidentSlot] - 1)
+      path += " -> ";
+  }
+
+  return path;
+}
+
+RuleResult classifyIncident(unsigned long durationMs,
+                            uint8_t nodeCount,
+                            uint8_t pirCount,
+                            uint8_t vibCount,
+                            uint8_t maxAlert,
+                            float minDistance)
+{
+  if(maxAlert >= 3 &&
+     nodeCount >= 3 &&
+     vibCount >= pirCount &&
+     durationMs <= 7000)
+  {
+    return {"VEHICLE", "CRITICAL", 82};
+  }
+
+  if(maxAlert >= 2 &&
+     nodeCount >= 2 &&
+     pirCount >= vibCount &&
+     durationMs >= 2000)
+  {
+    return {"HUMAN", "HIGH", 78};
+  }
+
+  if(nodeCount <= 2 &&
+     maxAlert <= 2 &&
+     pirCount > 0 &&
+     minDistance >= 20)
+  {
+    return {"ANIMAL", "MEDIUM", 68};
+  }
+
+  if(vibCount > 0 &&
+     pirCount == 0)
+  {
+    return {"VEHICLE", "HIGH", 62};
+  }
+
+  if(pirCount > 0)
+  {
+    return {"HUMAN", "MEDIUM", 58};
+  }
+
+  return {"UNKNOWN", "LOW", 40};
+}
+
+void updatePathMetrics(uint8_t localPir,
+                       uint8_t localVib,
+                       float localDist,
+                       bool southActive,
+                       bool westActive,
+                       bool northActive,
+                       bool eastActive)
+{
+  if(eventIndex <= 0)
+    return;
+
+  if(localPir) pathPirCount++;
+  if(westData.pir_recent) pathPirCount++;
+  if(northData.pir_recent) pathPirCount++;
+  if(eastData.pir_recent) pathPirCount++;
+
+  if(localVib) pathVibCount++;
+  if(westData.vib_recent) pathVibCount++;
+  if(northData.vib_recent) pathVibCount++;
+  if(eastData.vib_recent) pathVibCount++;
+
+  if(southActive) pathNodeMask |= (1 << 0);
+  if(westActive)  pathNodeMask |= (1 << 1);
+  if(northActive) pathNodeMask |= (1 << 2);
+  if(eastActive)  pathNodeMask |= (1 << 3);
+
+  if(localDist < pathMinDistance) pathMinDistance = localDist;
+  if(westData.distance < pathMinDistance) pathMinDistance = westData.distance;
+  if(northData.distance < pathMinDistance) pathMinDistance = northData.distance;
+  if(eastData.distance < pathMinDistance) pathMinDistance = eastData.distance;
+}
+
+void resetPathState()
+{
+  eventIndex = 0;
+  lastRecordedNode = -1;
+  pathStartTime = 0;
+  lastPathEventTime = 0;
+  pathMaxAlertLevel = 0;
+  pathPirCount = 0;
+  pathVibCount = 0;
+  pathNodeMask = 0;
+  pathMinDistance = 999;
+}
+
 void storeIncident()
 {
   if(eventIndex <= 0)
@@ -146,11 +294,42 @@ void storeIncident()
   }
 
   Incident &incident = incidentBuffer[incidentIndex];
+  unsigned long durationMs = 0;
+
+  if(pathStartTime > 0 && lastPathEventTime >= pathStartTime)
+    durationMs = lastPathEventTime - pathStartTime;
+
+  uint8_t nodeCount = countPathNodes(pathNodeMask);
+
+  if(nodeCount == 0)
+    nodeCount = countPathNodes(1 << (eventBuffer[0].node - 1));
+
+  RuleResult ruleResult =
+      classifyIncident(durationMs,
+                       nodeCount,
+                       pathPirCount,
+                       pathVibCount,
+                       pathMaxAlertLevel,
+                       pathMinDistance);
 
   incident.time = lastPathEventTime;
+  incident.durationMs = durationMs;
   incident.startNode = eventBuffer[0].node;
   incident.endNode = eventBuffer[eventIndex - 1].node;
+  incident.nodeCount = nodeCount;
+  incident.pirCount = pathPirCount;
+  incident.vibCount = pathVibCount;
   incident.maxAlert = pathMaxAlertLevel;
+  incident.minDistance = pathMinDistance;
+  incident.confidence = ruleResult.confidence;
+
+  copyText(incident.classification,
+           ruleResult.classification,
+           CLASS_NAME_SIZE);
+
+  copyText(incident.threat,
+           ruleResult.threat,
+           THREAT_NAME_SIZE);
 
   incidentPathLengths[incidentIndex] = eventIndex;
 
@@ -168,6 +347,21 @@ void storeIncident()
   Serial.println(nodeName(incident.endNode));
   Serial.print("ALERT LEVEL : LEVEL ");
   Serial.println(incident.maxAlert);
+  Serial.print("CLASS       : ");
+  Serial.print(incident.classification);
+  Serial.print(" (");
+  Serial.print(incident.confidence);
+  Serial.println("%)");
+  Serial.print("THREAT      : ");
+  Serial.println(incident.threat);
+  Serial.print("DURATION    : ");
+  Serial.print(incident.durationMs / 1000.0);
+  Serial.println(" sec");
+  Serial.print("NODE COUNT  : ");
+  Serial.println(incident.nodeCount);
+  Serial.print("MIN DIST    : ");
+  Serial.print(incident.minDistance);
+  Serial.println(" cm");
   Serial.print("PATH        : ");
 
   for(int i = 0; i < incidentPathLengths[incidentIndex]; i++)
@@ -179,6 +373,52 @@ void storeIncident()
   }
 
   Serial.println();
+  Serial.print("CSV         : ");
+  Serial.print(nodeName(incident.startNode));
+  Serial.print("-");
+  Serial.print(nodeName(incident.endNode));
+  Serial.print(",");
+  Serial.print(incident.nodeCount);
+  Serial.print(",");
+  Serial.print(incident.maxAlert);
+  Serial.print(",");
+  Serial.print(incident.durationMs / 1000.0);
+  Serial.print(",");
+  Serial.print(incident.pirCount);
+  Serial.print(",");
+  Serial.print(incident.vibCount);
+  Serial.print(",");
+  Serial.print(incident.minDistance);
+  Serial.print(",");
+  Serial.println(incident.classification);
+
+  Serial.print("JSON        : {\"time\":\"");
+  Serial.print(formatMillisTime(incident.time));
+  Serial.print("\",\"direction\":\"");
+  Serial.print(nodeName(incident.startNode));
+  Serial.print(" -> ");
+  Serial.print(nodeName(incident.endNode));
+  Serial.print("\",\"path\":\"");
+  Serial.print(pathToString(incidentIndex));
+  Serial.print("\",\"classification\":\"");
+  Serial.print(incident.classification);
+  Serial.print("\",\"threat\":\"");
+  Serial.print(incident.threat);
+  Serial.print("\",\"confidence\":");
+  Serial.print(incident.confidence);
+  Serial.print(",\"alertLevel\":");
+  Serial.print(incident.maxAlert);
+  Serial.print(",\"durationSec\":");
+  Serial.print(incident.durationMs / 1000.0);
+  Serial.print(",\"nodeCount\":");
+  Serial.print(incident.nodeCount);
+  Serial.print(",\"pirCount\":");
+  Serial.print(incident.pirCount);
+  Serial.print(",\"vibCount\":");
+  Serial.print(incident.vibCount);
+  Serial.print(",\"minDistance\":");
+  Serial.print(incident.minDistance);
+  Serial.println("}");
 
   incidentIndex++;
 }
@@ -201,6 +441,10 @@ void recordEvent(uint8_t node)
   eventBuffer[eventIndex].node = node;
   eventBuffer[eventIndex].time = millis();
 
+  if(eventIndex == 0)
+    pathStartTime = millis();
+
+  pathNodeMask |= (1 << (node - 1));
   lastRecordedNode = node;
   lastPathEventTime = millis();
 
@@ -348,10 +592,7 @@ void loop()
     Serial.println("PATH RESET");
     storeIncident();
 
-    eventIndex = 0;
-    lastRecordedNode = -1;
-    lastPathEventTime = 0;
-    pathMaxAlertLevel = 0;
+    resetPathState();
   }
 
 if(southActive && !prevSouthActive)
@@ -373,6 +614,15 @@ if(eastActive && !prevEastActive)
 {
   recordEvent(4);
 }
+
+  updatePathMetrics(localPir,
+                    localVib,
+                    localDist,
+                    southActive,
+                    westActive,
+                    northActive,
+                    eastActive);
+
   bool westOnline =
       (millis() - westLastSeen < 5000);
 
@@ -566,6 +816,27 @@ Serial.println(currentAlertLevel);
 Serial.println();
 Serial.print("INCIDENTS STORED : ");
 Serial.println(incidentIndex);
+
+if(eventIndex > 0)
+{
+  RuleResult liveRule =
+      classifyIncident(millis() - pathStartTime,
+                       countPathNodes(pathNodeMask),
+                       pathPirCount,
+                       pathVibCount,
+                       pathMaxAlertLevel,
+                       pathMinDistance);
+
+  Serial.print("LIVE CLASS  : ");
+  Serial.print(liveRule.classification);
+  Serial.print(" (");
+  Serial.print(liveRule.confidence);
+  Serial.println("%)");
+
+  Serial.print("LIVE THREAT : ");
+  Serial.println(liveRule.threat);
+}
+
 Serial.println();
 Serial.println("RECENT PATH");
 
