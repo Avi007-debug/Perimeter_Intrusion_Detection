@@ -96,6 +96,14 @@ bool prevSouthActive = false;
 bool prevWestActive  = false;
 bool prevNorthActive = false;
 bool prevEastActive  = false;
+bool prevSouthPir = false;
+bool prevWestPir  = false;
+bool prevNorthPir = false;
+bool prevEastPir  = false;
+bool prevSouthVib = false;
+bool prevWestVib  = false;
+bool prevNorthVib = false;
+bool prevEastVib  = false;
 int currentAlertLevel = 0;
 
 String nodeName(uint8_t node);
@@ -214,6 +222,27 @@ float averageMoveTime()
   }
 
   return (float)total / (eventIndex - 1) / 1000.0;
+}
+
+void printMoveIntervals()
+{
+  if(eventIndex < 2)
+    return;
+
+  Serial.println("MOVE INTERVALS");
+
+  for(int i = 1; i < eventIndex; i++)
+  {
+    float intervalSeconds =
+        (eventBuffer[i].time - eventBuffer[i - 1].time) / 1000.0;
+
+    Serial.print(nodeName(eventBuffer[i - 1].node));
+    Serial.print(" -> ");
+    Serial.print(nodeName(eventBuffer[i].node));
+    Serial.print(" : ");
+    Serial.print(intervalSeconds);
+    Serial.println(" sec");
+  }
 }
 
 const char *threatFromClassification(const char *classification,
@@ -355,15 +384,33 @@ void updatePathMetrics(uint8_t localPir,
   if(eventIndex <= 0)
     return;
 
-  if(localPir) pathPirCount++;
-  if(westData.pir_recent) pathPirCount++;
-  if(northData.pir_recent) pathPirCount++;
-  if(eastData.pir_recent) pathPirCount++;
+  bool westPir = westData.pir_recent;
+  bool northPir = northData.pir_recent;
+  bool eastPir = eastData.pir_recent;
 
-  if(localVib) pathVibCount++;
-  if(westData.vib_recent) pathVibCount++;
-  if(northData.vib_recent) pathVibCount++;
-  if(eastData.vib_recent) pathVibCount++;
+  bool westVib = westData.vib_recent;
+  bool northVib = northData.vib_recent;
+  bool eastVib = eastData.vib_recent;
+
+  if(localPir && !prevSouthPir) pathPirCount++;
+  if(westPir && !prevWestPir) pathPirCount++;
+  if(northPir && !prevNorthPir) pathPirCount++;
+  if(eastPir && !prevEastPir) pathPirCount++;
+
+  if(localVib && !prevSouthVib) pathVibCount++;
+  if(westVib && !prevWestVib) pathVibCount++;
+  if(northVib && !prevNorthVib) pathVibCount++;
+  if(eastVib && !prevEastVib) pathVibCount++;
+
+  prevSouthPir = localPir;
+  prevWestPir = westPir;
+  prevNorthPir = northPir;
+  prevEastPir = eastPir;
+
+  prevSouthVib = localVib;
+  prevWestVib = westVib;
+  prevNorthVib = northVib;
+  prevEastVib = eastVib;
 
   if(southActive) pathNodeMask |= (1 << 0);
   if(westActive)  pathNodeMask |= (1 << 1);
@@ -387,6 +434,14 @@ void resetPathState()
   pathVibCount = 0;
   pathNodeMask = 0;
   pathMinDistance = 999;
+  prevSouthPir = false;
+  prevWestPir = false;
+  prevNorthPir = false;
+  prevEastPir = false;
+  prevSouthVib = false;
+  prevWestVib = false;
+  prevNorthVib = false;
+  prevEastVib = false;
 }
 
 void storeIncident()
@@ -496,6 +551,8 @@ void storeIncident()
   }
 
   Serial.println();
+  printMoveIntervals();
+
   Serial.print("CSV,");
   Serial.print(formatMillisTime(incident.time));
   Serial.print(",");
@@ -994,6 +1051,8 @@ if(eventIndex >= 2)
 
   Serial.println();
 }
+
+printMoveIntervals();
 
 if(eventIndex >= 3)
 {
