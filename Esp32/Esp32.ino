@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <esp_now.h>
+#include <string.h>
 
 #define GREEN_LED 25
 #define BUZZER    26
@@ -47,6 +48,7 @@ struct Incident
   uint8_t pirCount;
   uint8_t vibCount;
   uint8_t maxAlert;
+  float avgMoveTime;
   float minDistance;
   char classification[CLASS_NAME_SIZE];
   char threat[THREAT_NAME_SIZE];
@@ -95,6 +97,8 @@ bool prevWestActive  = false;
 bool prevNorthActive = false;
 bool prevEastActive  = false;
 int currentAlertLevel = 0;
+
+String nodeName(uint8_t node);
 
 void copyText(char *target,
               const char *source,
@@ -182,49 +186,162 @@ String pathToString(uint8_t incidentSlot)
   return path;
 }
 
+String pathToCsvString(uint8_t incidentSlot)
+{
+  String path = "";
+
+  for(int i = 0; i < incidentPathLengths[incidentSlot]; i++)
+  {
+    path += nodeName(incidentPaths[incidentSlot][i]);
+
+    if(i < incidentPathLengths[incidentSlot] - 1)
+      path += "->";
+  }
+
+  return path;
+}
+
+float averageMoveTime()
+{
+  if(eventIndex < 2)
+    return 0;
+
+  unsigned long total = 0;
+
+  for(int i = 1; i < eventIndex; i++)
+  {
+    total += eventBuffer[i].time - eventBuffer[i - 1].time;
+  }
+
+  return (float)total / (eventIndex - 1) / 1000.0;
+}
+
+const char *threatFromClassification(const char *classification,
+                                     uint8_t confidence,
+                                     uint8_t maxAlert)
+{
+  if(maxAlert >= 3 && confidence >= 65)
+    return "CRITICAL";
+
+  if(strcmp(classification, "VEHICLE") == 0)
+    return "HIGH";
+
+  if(strcmp(classification, "HUMAN") == 0 && maxAlert >= 2)
+    return "HIGH";
+
+  if(strcmp(classification, "ANIMAL") == 0)
+    return "MEDIUM";
+
+  return "LOW";
+}
+
 RuleResult classifyIncident(unsigned long durationMs,
                             uint8_t nodeCount,
                             uint8_t pirCount,
                             uint8_t vibCount,
                             uint8_t maxAlert,
-                            float minDistance)
+                            float minDistance,
+                            float avgMoveTime)
 {
-  if(maxAlert >= 3 &&
-     nodeCount >= 3 &&
-     vibCount >= pirCount &&
-     durationMs <= 7000)
+  int humanScore = 0;
+  int animalScore = 0;
+  int vehicleScore = 0;
+
+  humanScore += pirCount * 10;
+  animalScore += pirCount * 7;
+  vehicleScore += pirCount * 2;
+
+  humanScore += vibCount * 3;
+  animalScore += vibCount * 3;
+  vehicleScore += vibCount * 12;
+
+  if(nodeCount >= 3)
   {
-    return {"VEHICLE", "CRITICAL", 82};
+    vehicleScore += 20;
+    humanScore += 10;
+  }
+  else if(nodeCount == 2)
+  {
+    humanScore += 15;
+  }
+  else
+  {
+    animalScore += 10;
   }
 
-  if(maxAlert >= 2 &&
-     nodeCount >= 2 &&
-     pirCount >= vibCount &&
-     durationMs >= 2000)
+  if(durationMs > 5000)
   {
-    return {"HUMAN", "HIGH", 78};
+    humanScore += 15;
+  }
+  else
+  {
+    vehicleScore += 10;
   }
 
-  if(nodeCount <= 2 &&
-     maxAlert <= 2 &&
-     pirCount > 0 &&
-     minDistance >= 20)
+  if(minDistance < 15)
   {
-    return {"ANIMAL", "MEDIUM", 68};
+    vehicleScore += 10;
+  }
+  else if(minDistance < 30)
+  {
+    humanScore += 10;
+  }
+  else
+  {
+    animalScore += 10;
   }
 
-  if(vibCount > 0 &&
-     pirCount == 0)
+  if(avgMoveTime > 0 && avgMoveTime < 1.0)
   {
-    return {"VEHICLE", "HIGH", 62};
+    vehicleScore += 20;
+  }
+  else if(avgMoveTime > 0 && avgMoveTime < 3.0)
+  {
+    humanScore += 15;
+  }
+  else if(avgMoveTime >= 3.0)
+  {
+    animalScore += 10;
   }
 
-  if(pirCount > 0)
+  if(maxAlert >= 3)
   {
-    return {"HUMAN", "MEDIUM", 58};
+    vehicleScore += 8;
+    humanScore += 6;
+  }
+  else if(maxAlert == 2)
+  {
+    humanScore += 6;
+    animalScore += 4;
   }
 
-  return {"UNKNOWN", "LOW", 40};
+  int total = humanScore + animalScore + vehicleScore;
+
+  if(total <= 0)
+    return {"UNKNOWN", "LOW", 40};
+
+  const char *classification = "HUMAN";
+  int winningScore = humanScore;
+
+  if(animalScore > winningScore)
+  {
+    classification = "ANIMAL";
+    winningScore = animalScore;
+  }
+
+  if(vehicleScore > winningScore)
+  {
+    classification = "VEHICLE";
+    winningScore = vehicleScore;
+  }
+
+  uint8_t confidence = (uint8_t)((winningScore * 100) / total);
+  const char *threat =
+      threatFromClassification(classification,
+                               confidence,
+                               maxAlert);
+
+  return {classification, threat, confidence};
 }
 
 void updatePathMetrics(uint8_t localPir,
@@ -300,6 +417,7 @@ void storeIncident()
     durationMs = lastPathEventTime - pathStartTime;
 
   uint8_t nodeCount = countPathNodes(pathNodeMask);
+  float avgMoveSeconds = averageMoveTime();
 
   if(nodeCount == 0)
     nodeCount = countPathNodes(1 << (eventBuffer[0].node - 1));
@@ -310,7 +428,8 @@ void storeIncident()
                        pathPirCount,
                        pathVibCount,
                        pathMaxAlertLevel,
-                       pathMinDistance);
+                       pathMinDistance,
+                       avgMoveSeconds);
 
   incident.time = lastPathEventTime;
   incident.durationMs = durationMs;
@@ -320,6 +439,7 @@ void storeIncident()
   incident.pirCount = pathPirCount;
   incident.vibCount = pathVibCount;
   incident.maxAlert = pathMaxAlertLevel;
+  incident.avgMoveTime = avgMoveSeconds;
   incident.minDistance = pathMinDistance;
   incident.confidence = ruleResult.confidence;
 
@@ -357,6 +477,9 @@ void storeIncident()
   Serial.print("DURATION    : ");
   Serial.print(incident.durationMs / 1000.0);
   Serial.println(" sec");
+  Serial.print("AVG MOVE TIME : ");
+  Serial.print(incident.avgMoveTime);
+  Serial.println(" sec");
   Serial.print("NODE COUNT  : ");
   Serial.println(incident.nodeCount);
   Serial.print("MIN DIST    : ");
@@ -373,20 +496,20 @@ void storeIncident()
   }
 
   Serial.println();
-  Serial.print("CSV         : ");
-  Serial.print(nodeName(incident.startNode));
-  Serial.print("-");
-  Serial.print(nodeName(incident.endNode));
+  Serial.print("CSV,");
+  Serial.print(formatMillisTime(incident.time));
+  Serial.print(",");
+  Serial.print(pathToCsvString(incidentIndex));
   Serial.print(",");
   Serial.print(incident.nodeCount);
-  Serial.print(",");
-  Serial.print(incident.maxAlert);
-  Serial.print(",");
-  Serial.print(incident.durationMs / 1000.0);
   Serial.print(",");
   Serial.print(incident.pirCount);
   Serial.print(",");
   Serial.print(incident.vibCount);
+  Serial.print(",");
+  Serial.print(incident.durationMs / 1000.0);
+  Serial.print(",");
+  Serial.print(incident.avgMoveTime);
   Serial.print(",");
   Serial.print(incident.minDistance);
   Serial.print(",");
@@ -410,6 +533,8 @@ void storeIncident()
   Serial.print(incident.maxAlert);
   Serial.print(",\"durationSec\":");
   Serial.print(incident.durationMs / 1000.0);
+  Serial.print(",\"avgMoveTime\":");
+  Serial.print(incident.avgMoveTime);
   Serial.print(",\"nodeCount\":");
   Serial.print(incident.nodeCount);
   Serial.print(",\"pirCount\":");
@@ -548,6 +673,7 @@ void setup()
   Serial.println("================================");
   Serial.println("NODE 1 SOUTH GATEWAY READY");
   Serial.println("================================");
+  Serial.println("CSV,Time,Path,NodeCount,PirCount,VibCount,Duration,AvgMoveTime,MinDistance,Classification");
 }
 
 void loop()
@@ -825,7 +951,8 @@ if(eventIndex > 0)
                        pathPirCount,
                        pathVibCount,
                        pathMaxAlertLevel,
-                       pathMinDistance);
+                       pathMinDistance,
+                       averageMoveTime());
 
   Serial.print("LIVE CLASS  : ");
   Serial.print(liveRule.classification);

@@ -8,6 +8,7 @@ const demoIncidents = [
     confidence: 78,
     alertLevel: 3,
     durationSec: 4.2,
+    avgMoveTime: 1.3,
     nodeCount: 3,
     pirCount: 11,
     vibCount: 7,
@@ -22,6 +23,7 @@ const demoIncidents = [
     confidence: 68,
     alertLevel: 2,
     durationSec: 2.6,
+    avgMoveTime: 2.6,
     nodeCount: 2,
     pirCount: 5,
     vibCount: 2,
@@ -36,6 +38,7 @@ const demoIncidents = [
     confidence: 82,
     alertLevel: 3,
     durationSec: 3.1,
+    avgMoveTime: 0.9,
     nodeCount: 3,
     pirCount: 6,
     vibCount: 9,
@@ -71,6 +74,8 @@ function render() {
   document.querySelector("#incidentPath").textContent = latest.path;
   document.querySelector("#incidentDuration").textContent =
     `${latest.durationSec} sec`;
+  document.querySelector("#incidentAvgMove").textContent =
+    `${latest.avgMoveTime ?? 0} sec`;
   document.querySelector("#incidentNodes").textContent =
     `${latest.nodeCount} active`;
   document.querySelector("#incidentDistance").textContent =
