@@ -1,6 +1,18 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <string.h>
+#include <PubSubClient.h>
+
+// ── MQTT / WiFi credentials ──────────────────────────────────────
+const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* MQTT_BROKER   = "YOUR_LAPTOP_IP";   // e.g. "192.168.1.100"
+const int   MQTT_PORT     = 1883;
+
+WiFiClient   wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+unsigned long lastStatusMs = 0;
 
 #define GREEN_LED 25
 #define BUZZER    26
@@ -17,6 +29,7 @@
 #define MAX_INCIDENTS   10
 #define CLASS_NAME_SIZE  12
 #define THREAT_NAME_SIZE 12
+#define VIB_EVENT_WEIGHT 3
 
 typedef struct
 {
@@ -397,10 +410,10 @@ void updatePathMetrics(uint8_t localPir,
   if(northPir && !prevNorthPir) pathPirCount++;
   if(eastPir && !prevEastPir) pathPirCount++;
 
-  if(localVib && !prevSouthVib) pathVibCount++;
-  if(westVib && !prevWestVib) pathVibCount++;
-  if(northVib && !prevNorthVib) pathVibCount++;
-  if(eastVib && !prevEastVib) pathVibCount++;
+  if(localVib && !prevSouthVib) pathVibCount += VIB_EVENT_WEIGHT;
+  if(westVib && !prevWestVib) pathVibCount += VIB_EVENT_WEIGHT;
+  if(northVib && !prevNorthVib) pathVibCount += VIB_EVENT_WEIGHT;
+  if(eastVib && !prevEastVib) pathVibCount += VIB_EVENT_WEIGHT;
 
   prevSouthPir = localPir;
   prevWestPir = westPir;
@@ -690,6 +703,70 @@ String nodeName(uint8_t node)
   return "UNKNOWN";
 }
 
+// ── MQTT helpers ─────────────────────────────────────────────────
+void mqttConnect()
+{
+  while (!mqttClient.connected())
+  {
+    Serial.print("[MQTT] Connecting...");
+
+    if (mqttClient.connect("SentinelMesh-Gateway"))
+    {
+      Serial.println(" connected.");
+    }
+    else
+    {
+      Serial.print(" failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" retrying in 2 s");
+      delay(2000);
+    }
+  }
+}
+
+void publishIncident(const Incident& inc, uint8_t slot)
+{
+  if (!mqttClient.connected()) mqttConnect();
+
+  String classification = inc.classification;
+  String threat         = inc.threat;
+  String path           = pathToString(slot);
+
+  String json =
+    String("{") +
+    "\"time\":\""        + formatMillisTime(inc.time) + "\"," +
+    "\"classification\":\"" + classification            + "\"," +
+    "\"confidence\":"    + String(inc.confidence)      + "," +
+    "\"threat\":\""      + threat                      + "\"," +
+    "\"alertLevel\":"    + String(inc.maxAlert)         + "," +
+    "\"path\":\""        + path                        + "\"," +
+    "\"durationSec\":"   + String(inc.durationMs / 1000.0) + "," +
+    "\"avgMoveTime\":"   + String(inc.avgMoveTime)     + "," +
+    "\"nodeCount\":"     + String(inc.nodeCount)        + "," +
+    "\"pirCount\":"      + String(inc.pirCount)         + "," +
+    "\"vibCount\":"      + String(inc.vibCount)         + "," +
+    "\"minDistance\":"   + String(inc.minDistance)      +
+    "}";
+
+  mqttClient.publish("perimeter/incident", json.c_str());
+  Serial.println("[MQTT] Published to perimeter/incident");
+}
+
+void publishStatus(bool south, bool west, bool north, bool east)
+{
+  if (!mqttClient.connected()) mqttConnect();
+
+  String json =
+    String("{") +
+    "\"south\":" + (south ? "true" : "false") + "," +
+    "\"west\":"  + (west  ? "true" : "false") + "," +
+    "\"north\":" + (north ? "true" : "false") + "," +
+    "\"east\":"  + (east  ? "true" : "false") +
+    "}";
+
+  mqttClient.publish("perimeter/status", json.c_str());
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -716,8 +793,27 @@ void setup()
   westData.vib_recent = 0;
   northData.vib_recent = 0;
   eastData.vib_recent = 0;
-  WiFi.mode(WIFI_STA);
 
+  // ── WiFi (needed for MQTT; ESP-NOW uses STA+AP dual mode)
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("[WiFi] Connecting");
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000)
+  {
+    delay(300);
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED)
+    Serial.println(" OK: " + WiFi.localIP().toString());
+  else
+    Serial.println(" TIMEOUT – MQTT unavailable");
+
+  // ── MQTT
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttConnect();
+
+  // ── ESP-NOW
   if (esp_now_init() != ESP_OK)
   {
     Serial.println("ESP-NOW Init Failed");
@@ -768,14 +864,29 @@ void loop()
   bool eastActive =
       nodeActive(eastData);
 
+  // ── MQTT keep-alive
+  if (mqttClient.connected())
+    mqttClient.loop();
+  else
+    mqttConnect();
+
   if(eventIndex > 0 &&
      millis() - lastPathEventTime > PATH_TIMEOUT_MS)
   {
     Serial.println();
     Serial.println("PATH RESET");
     storeIncident();
+    // publish the freshly stored incident
+    publishIncident(incidentBuffer[incidentIndex - 1], incidentIndex - 1);
 
     resetPathState();
+  }
+
+  // ── Publish node status every 1 second
+  if (millis() - lastStatusMs >= 1000)
+  {
+    lastStatusMs = millis();
+    publishStatus(southActive, westActive, northActive, eastActive);
   }
 
 if(southActive && !prevSouthActive)

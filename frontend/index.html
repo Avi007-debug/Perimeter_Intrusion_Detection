@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SentinelMesh AI — Smart Perimeter Intrusion System</title>
+  <meta name="description" content="SentinelMesh AI: Real-time smart perimeter intrusion detection dashboard powered by ESP-NOW mesh and AI classification.">
+  <link rel="icon" type="image/jpeg" href="/assets/logo.jpeg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Design tokens ───────────────────────────────────────────── */
+    :root {
+      --bg:          #060d0b;
+      --surface:     rgba(10, 22, 18, 0.82);
+      --surface-2:   rgba(16, 35, 28, 0.9);
+      --border:      rgba(67, 240, 143, 0.12);
+      --border-hi:   rgba(67, 240, 143, 0.45);
+      --text:        #e8f5ee;
+      --muted:       #7fa898;
+      --green:       #43f08f;
+      --cyan:        #72d8ff;
+      --amber:       #f5b84b;
+      --red:         #ff5f57;
+      --purple:      #c084fc;
+      --shadow-lg:   0 32px 96px rgba(0,0,0,.55);
+      --shadow-glow: 0 0 40px rgba(67,240,143,.18);
+      --radius-xl:   28px;
+      --radius-lg:   20px;
+      --radius-md:   14px;
+      --font:        'Inter', system-ui, sans-serif;
+      --mono:        'JetBrains Mono', monospace;
+    }
+
+    /* ── Reset ───────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 10% 5%,  rgba(67,240,143,.14) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 92% 8%,  rgba(114,216,255,.12) 0%, transparent 45%),
+        radial-gradient(ellipse 50% 60% at 50% 95%, rgba(192,132,252,.08) 0%, transparent 50%);
+    }
+
+    /* subtle grid */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(to bottom, black 0%, transparent 75%);
+    }
+
+    /* scanning line animation */
+    body::after {
+      content: '';
+      position: fixed; left: 0; right: 0; height: 2px; z-index: 999; pointer-events: none;
+      background: linear-gradient(90deg, transparent, rgba(67,240,143,.6), transparent);
+      animation: scan 6s linear infinite;
+      top: 0;
+    }
+    @keyframes scan { from { top: -2px; } to { top: 100vh; } }
+
+    /* ── Layout shell ────────────────────────────────────────────── */
+    .shell {
+      width: min(1280px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 28px 0 60px;
+    }
+
+    /* ── Topbar ──────────────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 36px;
+      padding: 0 2px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand-logo {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      border-radius: 16px;
+      filter: drop-shadow(0 0 16px rgba(67,240,143,.5));
+      animation: logoPulse 3s ease-in-out infinite;
+    }
+    @keyframes logoPulse {
+      0%, 100% { filter: drop-shadow(0 0 16px rgba(67,240,143,.5)); }
+      50%       { filter: drop-shadow(0 0 28px rgba(67,240,143,.85)); }
+    }
+
+    .brand-text { line-height: 1.1; }
+    .brand-name {
+      font-size: 1.6rem; font-weight: 800;
+      background: linear-gradient(90deg, var(--green), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      letter-spacing: -0.03em;
+    }
+    .brand-sub {
+      font-size: 0.72rem; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .14em;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border-hi);
+      border-radius: 999px;
+      padding: 7px 16px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--green);
+      background: rgba(67,240,143,.07);
+    }
+
+    .dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(67,240,143,.2), 0 0 16px rgba(67,240,143,.8);
+      animation: blink 1.4s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+    .clock {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--muted);
+      padding: 7px 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255,255,255,.03);
+    }
+
+    /* ── Section heading ─────────────────────────────────────────── */
+    .section-title {
+      font-size: 0.7rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .15em;
+      color: var(--green);
+      margin-bottom: 14px;
+    }
+
+    /* ── Cards / panels ──────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow-lg);
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .card:hover {
+      border-color: var(--border-hi);
+      box-shadow: var(--shadow-lg), var(--shadow-glow);
+    }
+    .card-inner { padding: 24px; }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-size: 1.05rem; font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .card-sub {
+      font-size: 0.75rem; color: var(--muted); margin-top: 2px;
+    }
+
+    /* ── Node cards grid ─────────────────────────────────────────── */
+    .nodes-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .node-card {
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      transition: all .35s;
+      position: relative;
+      overflow: hidden;
+    }
+    .node-card::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(circle at 70% 20%, rgba(67,240,143,.08), transparent 60%);
+      opacity: 0; transition: opacity .35s;
+    }
+    .node-card.online::before { opacity: 1; }
+
+    .node-card.online {
+      border-color: rgba(67,240,143,.45);
+      box-shadow: 0 0 24px rgba(67,240,143,.15);
+    }
+    .node-card.alert-active {
+      border-color: rgba(255,95,87,.6);
+      box-shadow: 0 0 24px rgba(255,95,87,.25);
+    }
+
+    .node-direction {
+      font-size: 0.68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .15em;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .node-id {
+      font-size: 1.45rem; font-weight: 800;
+      letter-spacing: -0.04em;
+    }
+    .node-status-row {
+      display: flex; align-items: center; gap: 8px; margin-top: 10px;
+    }
+    .status-pill {
+      font-size: 0.65rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em;
+      padding: 3px 10px; border-radius: 999px;
+      background: rgba(255,255,255,.07);
+      color: var(--muted); border: 1px solid var(--border);
+      transition: all .3s;
+    }
+    .node-card.online .status-pill {
+      background: rgba(67,240,143,.12);
+      color: var(--green);
+      border-color: rgba(67,240,143,.3);
+    }
+    .node-card.alert-active .status-pill {
+      background: rgba(255,95,87,.15);
+      color: var(--red);
+      border-color: rgba(255,95,87,.3);
+    }
+
+    /* ── Main grid ───────────────────────────────────────────────── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    /* ── Current incident panel ──────────────────────────────────── */
+    .incident-panel .card-inner { padding: 26px; }
+
+    .threat-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 0.73rem; font-weight: 800;
+      text-transform: uppercase; letter-spacing: .1em;
+    }
+    .threat-CRITICAL { background: rgba(255,95,87,.18); color: var(--red); border: 1px solid rgba(255,95,87,.4); }
+    .threat-HIGH     { background: rgba(245,184,75,.15); color: var(--amber); border: 1px solid rgba(245,184,75,.35); }
+    .threat-MEDIUM   { background: rgba(67,240,143,.1); color: var(--green); border: 1px solid rgba(67,240,143,.3); }
+    .threat-LOW      { background: rgba(114,216,255,.1); color: var(--cyan); border: 1px solid rgba(114,216,255,.3); }
+    .threat-NONE     { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid var(--border); }
+
+    .big-class {
+      font-size: 2.8rem; font-weight: 900;
+      letter-spacing: -0.05em;
+      line-height: 1;
+      margin: 14px 0 4px;
+      background: linear-gradient(135deg, var(--text), var(--muted));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    .confidence-bar-wrap {
+      margin: 18px 0 20px;
+    }
+    .confidence-label {
+      display: flex; justify-content: space-between;
+      font-size: 0.73rem; color: var(--muted); margin-bottom: 6px;
+    }
+    .confidence-bar {
+      height: 6px; border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, var(--green), var(--cyan));
+      transition: width .8s ease;
+    }
+
+    .incident-dl {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 20px;
+    }
+    .incident-dl-item {
+      display: flex; flex-direction: column;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+    .incident-dl-label {
+      font-size: 0.68rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .12em;
+      color: var(--muted); margin-bottom: 4px;
+    }
+    .incident-dl-value {
+      font-size: 0.95rem; font-weight: 700;
+      font-family: var(--mono);
+    }
+
+    /* ── Path tracking ───────────────────────────────────────────── */
+    .path-track {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      margin-top: 18px;
+    }
+    .path-node {
+      padding: 6px 14px;
+      border-radius: var(--radius-md);
+      background: rgba(67,240,143,.1);
+      border: 1px solid rgba(67,240,143,.3);
+      font-size: 0.8rem; font-weight: 700;
+      color: var(--green);
+      letter-spacing: .06em;
+    }
+    .path-arrow {
+      color: var(--amber); font-size: 1rem;
+    }
+
+    /* ── Perimeter map ───────────────────────────────────────────── */
+    .perim-map {
+      position: relative;
+      min-height: 340px;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--border);
+      background:
+        radial-gradient(circle at 50% 50%, rgba(67,240,143,.05) 0%, transparent 65%),
+        rgba(10,22,18,.6);
+      overflow: hidden;
+    }
+
+    .map-node {
+      position: absolute;
+      width: 100px; height: 100px;
+      border-radius: 24px;
+      display: grid; place-items: center; text-align: center;
+      border: 1px solid var(--border);
+      background: rgba(6,13,11,.85);
+      transition: all .4s;
+      cursor: default;
+    }
+    .map-node.online {
+      border-color: rgba(67,240,143,.6);
+      box-shadow: 0 0 28px rgba(67,240,143,.22);
+    }
+    .map-node.alert-active {
+      border-color: rgba(255,95,87,.7);
+      box-shadow: 0 0 28px rgba(255,95,87,.28);
+      animation: nodeAlert .8s ease-in-out infinite alternate;
+    }
+    @keyframes nodeAlert {
+      from { box-shadow: 0 0 28px rgba(255,95,87,.28); }
+      to   { box-shadow: 0 0 42px rgba(255,95,87,.55); }
+    }
+
+    .map-node-id   { font-size: 0.72rem; font-weight: 700; color: var(--muted); }
+    .map-node-name { font-size: 0.9rem; font-weight: 800; margin-top: 2px; }
+
+    .map-gateway {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90px; height: 90px;
+      border-radius: 20px;
+      display: grid; place-items: center; text-align: center;
+      border: 1px solid rgba(114,216,255,.45);
+      background: rgba(16,43,44,.9);
+      box-shadow: 0 0 24px rgba(114,216,255,.15);
+    }
+    .map-gateway-logo {
+      width: 48px; height: 48px;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+
+    .map-node-north { top: 16px;  left: calc(50% - 50px); }
+    .map-node-west  { top: calc(50% - 50px); left: 16px; }
+    .map-node-east  { top: calc(50% - 50px); right: 16px; }
+    .map-node-south { bottom: 16px; left: calc(50% - 50px); }
+
+    .map-path-svg {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; z-index: 0; pointer-events: none;
+    }
+    .map-path-line {
+      fill: none;
+      stroke: var(--amber);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-dasharray: 14 12;
+      animation: flow 2.4s linear infinite;
+      opacity: 0;
+      transition: opacity .5s;
+    }
+    .map-path-line.visible { opacity: 1; }
+    @keyframes flow { to { stroke-dashoffset: -52; } }
+
+    /* ── Charts row ──────────────────────────────────────────────── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Incident table ──────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 780px; }
+    thead th {
+      font-size: 0.68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .1em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 10px; text-align: left;
+    }
+    tbody td {
+      border-bottom: 1px solid rgba(255,255,255,.04);
+      padding: 13px 10px;
+      font-size: 0.85rem;
+    }
+    tbody tr:hover td { background: rgba(67,240,143,.03); }
+
+    .td-class  { font-weight: 700; color: var(--cyan); }
+    .td-threat-CRITICAL { color: var(--red); font-weight: 700; }
+    .td-threat-HIGH     { color: var(--amber); font-weight: 700; }
+    .td-threat-MEDIUM   { color: var(--green); font-weight: 700; }
+    .td-threat-LOW      { color: var(--cyan); }
+    .td-path { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+    .td-time { font-family: var(--mono); font-size: 0.8rem; }
+
+    /* pill */
+    .alert-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.68rem; font-weight: 700;
+    }
+    .alert-pill-3 { background: rgba(255,95,87,.18); color: var(--red); }
+    .alert-pill-2 { background: rgba(245,184,75,.15); color: var(--amber); }
+    .alert-pill-1 { background: rgba(67,240,143,.1);  color: var(--green); }
+    .alert-pill-0 { background: rgba(255,255,255,.06); color: var(--muted); }
+
+    /* ── Empty state ─────────────────────────────────────────────── */
+    .empty-state {
+      padding: 40px; text-align: center;
+      color: var(--muted); font-size: 0.9rem;
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      .main-grid    { grid-template-columns: 1fr; }
+      .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
+      .charts-grid  { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 640px) {
+      .topbar       { flex-direction: column; align-items: flex-start; }
+      .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
+      .charts-grid  { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ── Topbar ──────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <img src="/assets/logo.jpeg" alt="SentinelMesh AI Logo" class="brand-logo">
+      <div class="brand-text">
+        <div class="brand-name">SentinelMesh AI</div>
+        <div class="brand-sub">Smart Perimeter Intrusion System</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div id="server-badge" class="live-badge" style="border-color:rgba(127,168,152,.3);color:var(--muted);background:rgba(255,255,255,.03);">⬤ Connecting…</div>
+      <div class="live-badge"><span class="dot"></span> Live</div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ── Node Cards ───────────────────────────────────────────────── -->
+  <p class="section-title">Node Status</p>
+  <div class="nodes-grid">
+    <div class="node-card" id="node-south">
+      <div class="node-direction">South · Gateway N1</div>
+      <div class="node-id">S-01</div>
+      <div class="node-status-row">
+        <span class="status-pill" id="pill-south">Offline</span>
+      </div>
+    </div>
+    <div class="node-card" id="node-west">
+      <div class="node-direction">West · Node N2</div>
+      <div class="node-id">W-02</div>
+      <div class="node-status-row">
+        <span class="status-pill" id="pill-west">Offline</span>
+      </div>
+    </div>
+    <div class="node-card" id="node-north">
+      <div class="node-direction">North · Node N3</div>
+      <div class="node-id">N-03</div>
+      <div class="node-status-row">
+        <span class="status-pill" id="pill-north">Offline</span>
+      </div>
+    </div>
+    <div class="node-card" id="node-east">
+      <div class="node-direction">East · Node N4</div>
+      <div class="node-id">E-04</div>
+      <div class="node-status-row">
+        <span class="status-pill" id="pill-east">Offline</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main grid: incident + map ──────────────────────────────── -->
+  <div class="main-grid" style="margin-bottom:18px;">
+
+    <!-- Current Intrusion -->
+    <div class="card incident-panel">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Current Intrusion</div>
+            <div class="card-sub">Latest classified incident</div>
+          </div>
+          <span id="threat-badge" class="threat-badge threat-NONE">No Data</span>
+        </div>
+
+        <div class="big-class" id="big-class">——</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:4px;">Classification</div>
+
+        <div class="confidence-bar-wrap">
+          <div class="confidence-label">
+            <span>Confidence</span>
+            <span id="conf-pct">— %</span>
+          </div>
+          <div class="confidence-bar">
+            <div class="confidence-fill" id="conf-bar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="incident-dl">
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">Alert Level</span>
+            <span class="incident-dl-value" id="dl-alert">—</span>
+          </div>
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">Duration</span>
+            <span class="incident-dl-value" id="dl-duration">—</span>
+          </div>
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">Nodes Triggered</span>
+            <span class="incident-dl-value" id="dl-nodes">—</span>
+          </div>
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">Min Distance</span>
+            <span class="incident-dl-value" id="dl-dist">—</span>
+          </div>
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">PIR / VIB</span>
+            <span class="incident-dl-value" id="dl-sensors">—</span>
+          </div>
+          <div class="incident-dl-item">
+            <span class="incident-dl-label">Time</span>
+            <span class="incident-dl-value" id="dl-time">—</span>
+          </div>
+        </div>
+
+        <div style="margin-top:18px;">
+          <div class="incident-dl-label" style="margin-bottom:8px;">Path Tracking</div>
+          <div class="path-track" id="path-track">
+            <span style="color:var(--muted);font-size:.85rem;">No active path</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Perimeter Map -->
+    <div class="card">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Node Activity Map</div>
+            <div class="card-sub">50 cm detection threshold</div>
+          </div>
+        </div>
+        <div class="perim-map" id="perimMap">
+          <svg class="map-path-svg" viewBox="0 0 400 320" aria-hidden="true">
+            <path class="map-path-line" id="svgPath" d="M200 60 L60 160 L200 260 L340 160 Z"/>
+          </svg>
+          <!-- Nodes -->
+          <div class="map-node map-node-north" id="mnode-north">
+            <div class="map-node-id">N3</div>
+            <div class="map-node-name">North</div>
+          </div>
+          <div class="map-node map-node-west" id="mnode-west">
+            <div class="map-node-id">N2</div>
+            <div class="map-node-name">West</div>
+          </div>
+          <div class="map-node map-node-east" id="mnode-east">
+            <div class="map-node-id">N4</div>
+            <div class="map-node-name">East</div>
+          </div>
+          <div class="map-node map-node-south" id="mnode-south">
+            <div class="map-node-id">N1</div>
+            <div class="map-node-name">South</div>
+          </div>
+          <!-- Gateway centre -->
+          <div class="map-gateway">
+            <img src="/assets/logo.jpeg" alt="Gateway" class="map-gateway-logo">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Charts ──────────────────────────────────────────────────── -->
+  <p class="section-title">Analytics</p>
+  <div class="charts-grid">
+
+    <div class="card">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Classification</div>
+            <div class="card-sub">Incident breakdown</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="classChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Threat Level</div>
+            <div class="card-sub">Severity distribution</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="threatChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Node Activity</div>
+            <div class="card-sub">Detections per node</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="nodeChart"></canvas></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Incident Table ──────────────────────────────────────────── -->
+  <p class="section-title">Incident History</p>
+  <div class="card">
+    <div class="card-inner">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Incident Log</div>
+          <div class="card-sub">Last 20 incidents — auto-updating</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Classification</th>
+              <th>Threat</th>
+              <th>Confidence</th>
+              <th>Alert</th>
+              <th>Path</th>
+              <th>Duration</th>
+              <th>Min Dist</th>
+            </tr>
+          </thead>
+          <tbody id="incident-rows">
+            <tr><td colspan="8" class="empty-state">Waiting for incidents…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+// ── Clock ────────────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('en-GB', {hour12: false});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ── Charts setup ─────────────────────────────────────────────────────────────
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      labels: { color: '#7fa898', font: { family: 'Inter', size: 11 } }
+    }
+  }
+};
+
+const COLORS = {
+  green:  'rgba(67, 240, 143, 0.85)',
+  cyan:   'rgba(114, 216, 255, 0.85)',
+  amber:  'rgba(245, 184, 75, 0.85)',
+  red:    'rgba(255, 95, 87, 0.85)',
+  purple: 'rgba(192, 132, 252, 0.85)',
+  muted:  'rgba(127, 168, 152, 0.6)',
+};
+
+const classChart = new Chart(document.getElementById('classChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Human', 'Animal', 'Vehicle', 'Unknown'],
+    datasets: [{
+      data: [0, 0, 0, 0],
+      backgroundColor: [COLORS.cyan, COLORS.green, COLORS.amber, COLORS.muted],
+      borderColor: 'rgba(0,0,0,0)',
+      borderWidth: 0,
+      hoverOffset: 6
+    }]
+  },
+  options: { ...chartDefaults, cutout: '68%' }
+});
+
+const threatChart = new Chart(document.getElementById('threatChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Low', 'Medium', 'High', 'Critical'],
+    datasets: [{
+      data: [0, 0, 0, 0],
+      backgroundColor: [COLORS.cyan, COLORS.green, COLORS.amber, COLORS.red],
+      borderColor: 'rgba(0,0,0,0)',
+      borderWidth: 0,
+      hoverOffset: 6
+    }]
+  },
+  options: { ...chartDefaults, cutout: '68%' }
+});
+
+const nodeChart = new Chart(document.getElementById('nodeChart'), {
+  type: 'bar',
+  data: {
+    labels: ['South', 'West', 'North', 'East'],
+    datasets: [{
+      label: 'Detections',
+      data: [0, 0, 0, 0],
+      backgroundColor: [COLORS.green, COLORS.cyan, COLORS.amber, COLORS.purple],
+      borderRadius: 8,
+      borderSkipped: false
+    }]
+  },
+  options: {
+    ...chartDefaults,
+    plugins: { ...chartDefaults.plugins, legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#7fa898' }, grid: { color: 'rgba(255,255,255,.04)' } },
+      y: { ticks: { color: '#7fa898', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.04)' } }
+    }
+  }
+});
+
+// ── State ────────────────────────────────────────────────────────────────────
+let history = [];
+const classCounts  = { HUMAN: 0, ANIMAL: 0, VEHICLE: 0, UNKNOWN: 0 };
+const threatCounts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
+const nodeCounts   = { SOUTH: 0, WEST: 0, NORTH: 0, EAST: 0 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function threatClass(t) {
+  const map = { CRITICAL:'threat-CRITICAL', HIGH:'threat-HIGH', MEDIUM:'threat-MEDIUM', LOW:'threat-LOW' };
+  return map[t] || 'threat-NONE';
+}
+function alertPill(level) {
+  return `<span class="alert-pill alert-pill-${level}">Level ${level}</span>`;
+}
+function pathHTML(path) {
+  if (!path) return '<span style="color:var(--muted)">—</span>';
+  const parts = path.split(' -> ');
+  return parts.map((p, i) =>
+    `<span class="path-node">${p}</span>` +
+    (i < parts.length - 1 ? '<span class="path-arrow">→</span>' : '')
+  ).join('');
+}
+
+// ── Update current incident panel ────────────────────────────────────────────
+function updateIncidentPanel(inc) {
+  const threat = inc.threat || 'NONE';
+  const cls    = inc.classification || '——';
+
+  document.getElementById('big-class').textContent = cls;
+  document.getElementById('conf-pct').textContent  = (inc.confidence ?? '—') + '%';
+  document.getElementById('conf-bar').style.width  = (inc.confidence || 0) + '%';
+  document.getElementById('dl-alert').textContent    = `Level ${inc.alertLevel ?? '—'}`;
+  document.getElementById('dl-duration').textContent  = inc.durationSec ? inc.durationSec.toFixed(1) + ' s' : '—';
+  document.getElementById('dl-nodes').textContent     = (inc.nodeCount ?? '—') + ' nodes';
+  document.getElementById('dl-dist').textContent      = inc.minDistance ? inc.minDistance.toFixed(0) + ' cm' : '—';
+  document.getElementById('dl-sensors').textContent   = `PIR ${inc.pirCount ?? '—'} / VIB ${inc.vibCount ?? '—'}`;
+  document.getElementById('dl-time').textContent      = inc.time || '—';
+
+  const badge = document.getElementById('threat-badge');
+  badge.className = 'threat-badge ' + threatClass(threat);
+  badge.textContent = threat;
+
+  // path
+  document.getElementById('path-track').innerHTML = pathHTML(inc.path);
+}
+
+// ── Update node cards + map ──────────────────────────────────────────────────
+function updateStatus(status) {
+  const dirs = ['south', 'west', 'north', 'east'];
+  dirs.forEach(dir => {
+    const active = status[dir] === true;
+    const card  = document.getElementById('node-' + dir);
+    const pill  = document.getElementById('pill-' + dir);
+    const mnode = document.getElementById('mnode-' + dir);
+
+    // 'online'       = server is sending data for this node (always true once MQTT running)
+    // 'alert-active' = node is currently detecting something
+    card.classList.toggle('online', !active);         // green idle glow
+    card.classList.toggle('alert-active', active);    // red detection glow
+    pill.textContent = active ? 'Detecting' : 'Idle';
+    mnode.classList.toggle('online', !active);
+    mnode.classList.toggle('alert-active', active);
+  });
+
+  // Show SVG path line when any node is actively detecting
+  const anyActive = dirs.some(d => status[d]);
+  document.getElementById('svgPath').classList.toggle('visible', anyActive);
+}
+
+// ── Rebuild incident table ────────────────────────────────────────────────────
+function rebuildTable() {
+  const tbody = document.getElementById('incident-rows');
+  if (!history.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No incidents yet…</td></tr>';
+    return;
+  }
+  tbody.innerHTML = history.slice(0, 20).map(inc => `
+    <tr>
+      <td class="td-time">${inc.time || '—'}</td>
+      <td class="td-class">${inc.classification || '—'}</td>
+      <td class="td-threat-${inc.threat || ''}">${inc.threat || '—'}</td>
+      <td>${(inc.confidence ?? '—')}%</td>
+      <td>${alertPill(inc.alertLevel ?? 0)}</td>
+      <td class="td-path">${inc.path || '—'}</td>
+      <td>${inc.durationSec ? inc.durationSec.toFixed(1) + ' s' : '—'}</td>
+      <td>${inc.minDistance ? inc.minDistance.toFixed(0) + ' cm' : '—'}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Update charts ─────────────────────────────────────────────────────────────
+function updateCharts() {
+  classChart.data.datasets[0].data = [
+    classCounts.HUMAN, classCounts.ANIMAL, classCounts.VEHICLE, classCounts.UNKNOWN
+  ];
+  classChart.update('none');
+
+  threatChart.data.datasets[0].data = [
+    threatCounts.LOW, threatCounts.MEDIUM, threatCounts.HIGH, threatCounts.CRITICAL
+  ];
+  threatChart.update('none');
+
+  nodeChart.data.datasets[0].data = [
+    nodeCounts.SOUTH, nodeCounts.WEST, nodeCounts.NORTH, nodeCounts.EAST
+  ];
+  nodeChart.update('none');
+}
+
+// ── Accumulate counts from full history ──────────────────────────────────────
+function recount() {
+  ['HUMAN','ANIMAL','VEHICLE','UNKNOWN'].forEach(k => classCounts[k] = 0);
+  ['LOW','MEDIUM','HIGH','CRITICAL'].forEach(k => threatCounts[k] = 0);
+  ['SOUTH','WEST','NORTH','EAST'].forEach(k => nodeCounts[k] = 0);
+
+  history.forEach(inc => {
+    const cls = (inc.classification || 'UNKNOWN').toUpperCase();
+    if (cls in classCounts) classCounts[cls]++;
+    const thr = (inc.threat || 'LOW').toUpperCase();
+    if (thr in threatCounts) threatCounts[thr]++;
+
+    // count from path
+    if (inc.path) {
+      inc.path.split(' -> ').forEach(node => {
+        const n = node.trim().toUpperCase();
+        if (n in nodeCounts) nodeCounts[n]++;
+      });
+    }
+  });
+}
+
+// ── Poll API ─────────────────────────────────────────────────────────────────
+async function pollCurrent() {
+  try {
+    const res = await fetch('/api/current');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && Object.keys(data).length) {
+      updateIncidentPanel(data);
+    }
+  } catch(e) { /* offline */ }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    updateStatus(data);
+  } catch(e) { /* offline */ }
+}
+
+async function pollHistory() {
+  try {
+    const res = await fetch('/api/history');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length !== history.length) {
+      history = data;
+      recount();
+      rebuildTable();
+      updateCharts();
+      if (history.length) updateIncidentPanel(history[0]);
+    }
+  } catch(e) { /* offline */ }
+}
+
+// ── Polling intervals ────────────────────────────────────────────────────────
+pollStatus();
+pollCurrent();
+pollHistory();
+setInterval(pollStatus,  1500);
+setInterval(pollCurrent, 2000);
+setInterval(pollHistory, 3000);
+
+// ── Server health indicator ──────────────────────────────────────────────────
+async function checkHealth() {
+  const badge = document.getElementById('server-badge');
+  try {
+    const res  = await fetch('/api/health');
+    const data = await res.json();
+    if (data.status === 'ok') {
+      badge.style.borderColor = 'rgba(67,240,143,.45)';
+      badge.style.color       = 'var(--green)';
+      badge.style.background  = 'rgba(67,240,143,.07)';
+      badge.textContent = data.mqtt_connected ? '⬤ Server + MQTT OK' : '⬤ Server OK · MQTT offline';
+    }
+  } catch {
+    badge.style.borderColor = 'rgba(255,95,87,.4)';
+    badge.style.color       = 'var(--red)';
+    badge.style.background  = 'rgba(255,95,87,.07)';
+    badge.textContent = '⬤ Server offline';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 5000);
+</script>
+</body>
+</html>
