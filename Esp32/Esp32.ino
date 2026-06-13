@@ -4,9 +4,9 @@
 #include <PubSubClient.h>
 
 // ── MQTT / WiFi credentials ──────────────────────────────────────
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* MQTT_BROKER   = "YOUR_LAPTOP_IP";   // e.g. "192.168.1.100"
+const char* WIFI_SSID     = "Avi's Nord 5G";
+const char* WIFI_PASSWORD = "Avi@9322564784";
+const char* MQTT_BROKER   = "10.223.253.189";  
 const int   MQTT_PORT     = 1883;
 
 WiFiClient   wifiClient;
@@ -704,29 +704,27 @@ String nodeName(uint8_t node)
 }
 
 // ── MQTT helpers ─────────────────────────────────────────────────
+// Non-blocking: one attempt only. Called every loop when WiFi is up.
 void mqttConnect()
 {
-  while (!mqttClient.connected())
-  {
-    Serial.print("[MQTT] Connecting...");
+  if (mqttClient.connected()) return;
 
-    if (mqttClient.connect("SentinelMesh-Gateway"))
-    {
-      Serial.println(" connected.");
-    }
-    else
-    {
-      Serial.print(" failed, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" retrying in 2 s");
-      delay(2000);
-    }
+  Serial.print("[MQTT] Connecting...");
+
+  if (mqttClient.connect("SentinelMesh-Gateway"))
+    Serial.println(" connected.");
+  else
+  {
+    Serial.print(" failed, rc=");
+    Serial.println(mqttClient.state());
   }
 }
 
 void publishIncident(const Incident& inc, uint8_t slot)
 {
-  if (!mqttClient.connected()) mqttConnect();
+  // Only publish when WiFi AND MQTT are ready
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (!mqttClient.connected()) return;
 
   String classification = inc.classification;
   String threat         = inc.threat;
@@ -752,16 +750,26 @@ void publishIncident(const Incident& inc, uint8_t slot)
   Serial.println("[MQTT] Published to perimeter/incident");
 }
 
-void publishStatus(bool south, bool west, bool north, bool east)
+// Upgraded status payload: {online, active} per node.
+// online = heard from that node within 5 s (or true for south=gateway)
+// active = currently sensing (PIR/VIB + distance)
+void publishStatus(
+  bool southOnline, bool southActive,
+  bool westOnline,  bool westActive,
+  bool northOnline, bool northActive,
+  bool eastOnline,  bool eastActive)
 {
-  if (!mqttClient.connected()) mqttConnect();
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (!mqttClient.connected()) return;
+
+  auto bstr = [](bool b) -> const char* { return b ? "true" : "false"; };
 
   String json =
     String("{") +
-    "\"south\":" + (south ? "true" : "false") + "," +
-    "\"west\":"  + (west  ? "true" : "false") + "," +
-    "\"north\":" + (north ? "true" : "false") + "," +
-    "\"east\":"  + (east  ? "true" : "false") +
+    "\"south\":{\"online\":" + bstr(southOnline) + ",\"active\":" + bstr(southActive) + "}," +
+    "\"west\":{\"online\":"  + bstr(westOnline)  + ",\"active\":" + bstr(westActive)  + "}," +
+    "\"north\":{\"online\":" + bstr(northOnline) + ",\"active\":" + bstr(northActive) + "}," +
+    "\"east\":{\"online\":"  + bstr(eastOnline)  + ",\"active\":" + bstr(eastActive)  + "}" +
     "}";
 
   mqttClient.publish("perimeter/status", json.c_str());
@@ -804,16 +812,18 @@ void setup()
     delay(300);
     Serial.print(".");
   }
+
   if (WiFi.status() == WL_CONNECTED)
+  {
     Serial.println(" OK: " + WiFi.localIP().toString());
+    // ── MQTT only configured when WiFi is actually up
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttConnect();
+  }
   else
-    Serial.println(" TIMEOUT – MQTT unavailable");
+    Serial.println(" TIMEOUT – running offline, MQTT skipped");
 
-  // ── MQTT
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  mqttConnect();
-
-  // ── ESP-NOW
+  // ── ESP-NOW (always runs regardless of WiFi/MQTT state)
   if (esp_now_init() != ESP_OK)
   {
     Serial.println("ESP-NOW Init Failed");
@@ -864,11 +874,14 @@ void loop()
   bool eastActive =
       nodeActive(eastData);
 
-  // ── MQTT keep-alive
-  if (mqttClient.connected())
-    mqttClient.loop();
-  else
-    mqttConnect();
+  // ── MQTT keep-alive (non-blocking; runs only when WiFi is up)
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    if (mqttClient.connected())
+      mqttClient.loop();
+    else
+      mqttConnect();   // single non-blocking attempt, never delays
+  }
 
   if(eventIndex > 0 &&
      millis() - lastPathEventTime > PATH_TIMEOUT_MS)
@@ -876,7 +889,7 @@ void loop()
     Serial.println();
     Serial.println("PATH RESET");
     storeIncident();
-    // publish the freshly stored incident
+    // Publish only when connectivity is available; safe to skip if offline
     publishIncident(incidentBuffer[incidentIndex - 1], incidentIndex - 1);
 
     resetPathState();
@@ -886,7 +899,16 @@ void loop()
   if (millis() - lastStatusMs >= 1000)
   {
     lastStatusMs = millis();
-    publishStatus(southActive, westActive, northActive, eastActive);
+    // south is the gateway — always online if this code is running
+    bool southOnline = true;
+    bool westOnline  = (millis() - westLastSeen  < 5000);
+    bool northOnline = (millis() - northLastSeen < 5000);
+    bool eastOnline  = (millis() - eastLastSeen  < 5000);
+    publishStatus(
+      southOnline, southActive,
+      westOnline,  westActive,
+      northOnline, northActive,
+      eastOnline,  eastActive);
   }
 
 if(southActive && !prevSouthActive)
