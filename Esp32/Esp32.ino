@@ -30,7 +30,7 @@ unsigned long lastMqttAttemptMs = 0;   // throttle MQTT reconnect attempts
 #define MAX_INCIDENTS   10
 #define CLASS_NAME_SIZE  12
 #define THREAT_NAME_SIZE 12
-#define VIB_EVENT_WEIGHT 3
+#define VIB_EVENT_WEIGHT 1
 
 typedef struct
 {
@@ -833,6 +833,8 @@ void setup()
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println(" OK: " + WiFi.localIP().toString());
+    Serial.print("WiFi Channel: ");
+    Serial.println(WiFi.channel());
     // ── MQTT only configured when WiFi is actually up
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
     mqttConnect();
@@ -1047,10 +1049,10 @@ if(eastActive && !prevEastActive)
     if(currentAlertLevel == 1)
     {
       digitalWrite(BUZZER, HIGH);
-      delay(150);
+      delay(200);
 
       digitalWrite(BUZZER, LOW);
-      delay(150);
+      delay(200);
     }
     else if(currentAlertLevel == 2)
     {

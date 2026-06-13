@@ -22,7 +22,7 @@ SensorData data;
 unsigned long lastPirTime = 0;
 unsigned long lastVibTime = 0;
 
-uint8_t gatewayMAC[] = {0x00,0x4B,0x12,0x30,0xCD,0xBC};
+uint8_t gatewayMAC[] = {0x00,0x4B,0x12,0x30,0xCD,0xBD};
 
 float getDistance() {
 

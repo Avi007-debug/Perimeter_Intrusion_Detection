@@ -20,7 +20,7 @@ typedef struct {
 SensorData data;
 
 uint8_t receiverMAC[] = {
-  0x00, 0x4B, 0x12, 0x30, 0xCD, 0xBC
+  0x00, 0x4B, 0x12, 0x30, 0xCD, 0xBD
 };
 
 unsigned long lastPirTime = 0;
@@ -42,6 +42,16 @@ float getDistance()
     return 999;
 
   return duration * 0.0343 / 2.0;
+}
+
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus)
+{
+  Serial.print("ESP-NOW Send Status: ");
+
+  if(sendStatus == 0)
+    Serial.println("SUCCESS");
+  else
+    Serial.println("FAILED");
 }
 
 void setup()
@@ -69,6 +79,9 @@ void setup()
     }
   }
 
+  Serial.print("Using Channel: ");
+  Serial.println(channel);
+
   if (esp_now_init() != 0)
   {
     Serial.println("ESP-NOW Init Failed");
@@ -80,13 +93,21 @@ void setup()
   wifi_promiscuous_enable(0);
 
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
+  esp_now_register_send_cb(OnDataSent);
 
-  esp_now_add_peer(
-      receiverMAC,
-      ESP_NOW_ROLE_SLAVE,
-      channel,
-      NULL,
-      0);
+  if (esp_now_add_peer(
+        receiverMAC,
+        ESP_NOW_ROLE_SLAVE,
+        channel,
+        NULL,
+        0) == 0)
+  {
+      Serial.println("Peer added OK");
+  }
+  else
+  {
+      Serial.println("Peer add FAILED");
+  }
 
   Serial.println("NODE 4 EAST READY");
 }
