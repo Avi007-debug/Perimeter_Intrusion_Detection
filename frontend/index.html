@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SentinelMesh AI — Smart Perimeter Intrusion System</title>
   <meta name="description" content="SentinelMesh AI: Real-time smart perimeter intrusion detection dashboard powered by ESP-NOW mesh and AI classification.">
-  <link rel="icon" type="image/jpeg" href="/assets/logo.jpeg">
+  <link rel="icon" type="image/jpeg" href="/assets/logo.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -505,7 +505,7 @@
   <!-- ── Topbar ──────────────────────────────────────────────────── -->
   <header class="topbar">
     <div class="brand">
-      <img src="/assets/logo.jpeg" alt="SentinelMesh AI Logo" class="brand-logo">
+      <img src="/assets/logo.jpg" alt="SentinelMesh AI Logo" class="brand-logo">
       <div class="brand-text">
         <div class="brand-name">SentinelMesh AI</div>
         <div class="brand-sub">Smart Perimeter Intrusion System</div>
@@ -646,7 +646,7 @@
           </div>
           <!-- Gateway centre -->
           <div class="map-gateway">
-            <img src="/assets/logo.jpeg" alt="Gateway" class="map-gateway-logo">
+            <img src="/assets/logo.jpg" alt="Gateway" class="map-gateway-logo">
           </div>
         </div>
       </div>
@@ -858,25 +858,33 @@ function updateIncidentPanel(inc) {
 }
 
 // ── Update node cards + map ──────────────────────────────────────────────────
+// Status payload is now: { "south":{"online":bool,"active":bool}, ... }
 function updateStatus(status) {
   const dirs = ['south', 'west', 'north', 'east'];
   dirs.forEach(dir => {
-    const active = status[dir] === true;
+    const node   = status[dir] || {};
+    // Support both old flat bool and new nested object
+    const online = (typeof node === 'object') ? !!node.online : !!node;
+    const active = (typeof node === 'object') ? !!node.active : !!node;
+
     const card  = document.getElementById('node-' + dir);
     const pill  = document.getElementById('pill-' + dir);
     const mnode = document.getElementById('mnode-' + dir);
 
-    // 'online'       = server is sending data for this node (always true once MQTT running)
-    // 'alert-active' = node is currently detecting something
-    card.classList.toggle('online', !active);         // green idle glow
-    card.classList.toggle('alert-active', active);    // red detection glow
-    pill.textContent = active ? 'Detecting' : 'Idle';
-    mnode.classList.toggle('online', !active);
+    // Three states: offline (neither), idle-online (online only), detecting (active)
+    card.classList.toggle('online',       online && !active);
+    card.classList.toggle('alert-active', active);
+    mnode.classList.toggle('online',       online && !active);
     mnode.classList.toggle('alert-active', active);
+
+    pill.textContent = !online ? 'Offline' : active ? 'Detecting' : 'Idle';
   });
 
   // Show SVG path line when any node is actively detecting
-  const anyActive = dirs.some(d => status[d]);
+  const anyActive = dirs.some(d => {
+    const n = status[d] || {};
+    return (typeof n === 'object') ? n.active : n;
+  });
   document.getElementById('svgPath').classList.toggle('visible', anyActive);
 }
 
