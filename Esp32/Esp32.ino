@@ -12,7 +12,8 @@ const int   MQTT_PORT     = 1883;
 WiFiClient   wifiClient;
 PubSubClient mqttClient(wifiClient);
 
-unsigned long lastStatusMs = 0;
+unsigned long lastStatusMs    = 0;
+unsigned long lastMqttAttemptMs = 0;   // throttle MQTT reconnect attempts
 
 #define GREEN_LED 25
 #define BUZZER    26
@@ -704,10 +705,17 @@ String nodeName(uint8_t node)
 }
 
 // ── MQTT helpers ─────────────────────────────────────────────────
-// Non-blocking: one attempt only. Called every loop when WiFi is up.
+// Non-blocking: one attempt every 10 s only. ESP-NOW always runs regardless.
 void mqttConnect()
 {
+  static bool abandonMqtt = false;
+  if (abandonMqtt) return;
+
   if (mqttClient.connected()) return;
+
+  // Only retry every 10 seconds — keeps the loop free
+  if (millis() - lastMqttAttemptMs < 10000) return;
+  lastMqttAttemptMs = millis();
 
   Serial.print("[MQTT] Connecting...");
 
@@ -717,6 +725,8 @@ void mqttConnect()
   {
     Serial.print(" failed, rc=");
     Serial.println(mqttClient.state());
+    Serial.println("[MQTT] Abandoning MQTT reconnect to prevent blocking ESP-NOW.");
+    abandonMqtt = true;
   }
 }
 
@@ -778,7 +788,7 @@ void publishStatus(
 void setup()
 {
   Serial.begin(115200);
-
+  delay(1000);
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
   pinMode(BUZZER, OUTPUT);
@@ -812,6 +822,13 @@ void setup()
     delay(300);
     Serial.print(".");
   }
+
+  // Now that WiFi is initialized, we can safely print the true MAC addresses
+  Serial.println();
+  Serial.print("STA MAC: ");
+  Serial.println(WiFi.macAddress());
+  Serial.print("AP MAC: ");
+  Serial.println(WiFi.softAPmacAddress());
 
   if (WiFi.status() == WL_CONNECTED)
   {
@@ -853,8 +870,12 @@ void loop()
   uint8_t localVib =
       (millis() - lastVibTime < 3000);
 
-  float localDist =
-      getDistance();
+  static float localDist = 999.0;
+  static unsigned long lastDistMs = 0;
+  if (millis() - lastDistMs >= 500) {
+    lastDistMs = millis();
+    localDist = getDistance();
+  }
 
   bool southActive =
       (
@@ -901,9 +922,9 @@ void loop()
     lastStatusMs = millis();
     // south is the gateway — always online if this code is running
     bool southOnline = true;
-    bool westOnline  = (millis() - westLastSeen  < 5000);
-    bool northOnline = (millis() - northLastSeen < 5000);
-    bool eastOnline  = (millis() - eastLastSeen  < 5000);
+    bool westOnline  = (millis() - westLastSeen  < 8000);
+    bool northOnline = (millis() - northLastSeen < 8000);
+    bool eastOnline  = (millis() - eastLastSeen  < 8000);
     publishStatus(
       southOnline, southActive,
       westOnline,  westActive,
@@ -940,13 +961,13 @@ if(eastActive && !prevEastActive)
                     eastActive);
 
   bool westOnline =
-      (millis() - westLastSeen < 5000);
+      (millis() - westLastSeen < 8000);
 
   bool northOnline =
-      (millis() - northLastSeen < 5000);
+      (millis() - northLastSeen < 8000);
 
   bool eastOnline =
-      (millis() - eastLastSeen < 5000);
+      (millis() - eastLastSeen < 8000);
 
   int activeNodes = 0;
 
@@ -1026,18 +1047,22 @@ if(eastActive && !prevEastActive)
     if(currentAlertLevel == 1)
     {
       digitalWrite(BUZZER, HIGH);
-      delay(200);
+      delay(150);
 
       digitalWrite(BUZZER, LOW);
-      delay(800);
+      delay(150);
     }
     else if(currentAlertLevel == 2)
     {
-      digitalWrite(BUZZER, HIGH);
-      delay(150);
-
-      digitalWrite(BUZZER, LOW);
-      delay(150);
+      // Fast triple-beep for level 2 — clearly audible & urgent
+      for(int b = 0; b < 5; b++)
+      {
+        digitalWrite(BUZZER, HIGH);
+        delay(40);
+        digitalWrite(BUZZER, LOW);
+        delay(40);
+      }
+      delay(150);   // pause between bursts
     }
     else if(currentAlertLevel == 3)
     {
@@ -1045,10 +1070,15 @@ if(eastActive && !prevEastActive)
     }
   }
 
-  Serial.println();
-Serial.println("================================");
+  static unsigned long lastPrintMs = 0;
+  if(millis() - lastPrintMs >= 500)
+  {
+    lastPrintMs = millis();
 
-Serial.println("NODE 1 SOUTH");
+    Serial.println();
+    Serial.println("================================");
+
+    Serial.println("NODE 1 SOUTH");
 
 Serial.print("PIR      : ");
 Serial.println(localPir);
@@ -1213,10 +1243,11 @@ Serial.println();
 
 Serial.println();
 
-Serial.println("================================");
-prevSouthActive = southActive;
-prevWestActive  = westActive;
-prevNorthActive = northActive;
-prevEastActive  = eastActive;
-  delay(500);
+    Serial.println("================================");
+  }
+
+  prevSouthActive = southActive;
+  prevWestActive  = westActive;
+  prevNorthActive = northActive;
+  prevEastActive  = eastActive;
 }

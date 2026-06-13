@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 extern "C" {
 #include <espnow.h>
+#include <user_interface.h>
 }
 
 #define PIR_PIN    14 //D5
@@ -54,6 +55,19 @@ void setup()
   pinMode(ECHO_PIN, INPUT);
 
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+
+  Serial.println("Scanning for Gateway channel...");
+  int channel = 1;
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == "Avi's Nord 5G") {
+      channel = WiFi.channel(i);
+      Serial.print("Found hotspot on channel: ");
+      Serial.println(channel);
+      break;
+    }
+  }
 
   if (esp_now_init() != 0)
   {
@@ -61,12 +75,16 @@ void setup()
     return;
   }
 
+  wifi_promiscuous_enable(1);
+  wifi_set_channel(channel);
+  wifi_promiscuous_enable(0);
+
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
 
   esp_now_add_peer(
       receiverMAC,
       ESP_NOW_ROLE_SLAVE,
-      1,
+      channel,
       NULL,
       0);
 
@@ -81,41 +99,29 @@ void loop()
   if(digitalRead(SW420_PIN))
     lastVibTime = millis();
 
-  data.node_id = 4;
+  static unsigned long lastSendTime = 0;
+  if(millis() - lastSendTime >= 1000) {
+    lastSendTime = millis();
 
-  data.pir_recent =
-      (millis() - lastPirTime < 3000);
+    data.node_id = 4;
+    data.pir_recent = (millis() - lastPirTime < 3000);
+    data.vib_recent = (millis() - lastVibTime < 3000);
+    data.distance = getDistance();
+    data.trigger_time = millis();
 
-  data.vib_recent =
-      (millis() - lastVibTime < 3000);
+    esp_now_send(receiverMAC, (uint8_t*)&data, sizeof(data));
 
-  data.distance = getDistance();
-
-  data.trigger_time = millis();
-
-  esp_now_send(
-      receiverMAC,
-      (uint8_t*)&data,
-      sizeof(data));
-
-  Serial.println();
-  Serial.println("======================");
-
-  Serial.println("NODE 4 EAST");
-
-  Serial.print("PIR      : ");
-  Serial.println(data.pir_recent);
-
-  Serial.print("VIB      : ");
-  Serial.println(data.vib_recent);
-
-  Serial.print("DISTANCE : ");
-  Serial.println(data.distance);
-
-  Serial.print("TIME     : ");
-  Serial.println(data.trigger_time);
-
-  Serial.println("======================");
-
-  delay(1000);
+    Serial.println();
+    Serial.println("======================");
+    Serial.println("NODE 4 EAST");
+    Serial.print("PIR      : ");
+    Serial.println(data.pir_recent);
+    Serial.print("VIB      : ");
+    Serial.println(data.vib_recent);
+    Serial.print("DISTANCE : ");
+    Serial.println(data.distance);
+    Serial.print("TIME     : ");
+    Serial.println(data.trigger_time);
+    Serial.println("======================");
+  }
 }
