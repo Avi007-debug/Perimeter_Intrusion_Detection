@@ -443,6 +443,62 @@
       justify-content: center;
     }
 
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .kpi-card {
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      min-height: 104px;
+    }
+    .kpi-label {
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .kpi-value {
+      font-family: var(--mono);
+      font-size: 1.85rem;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .kpi-sub {
+      margin-top: 8px;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .search-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .search-controls select,
+    .search-controls button {
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      padding: 0 10px;
+      font: 700 0.72rem var(--font);
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .search-controls button {
+      cursor: pointer;
+      color: var(--green);
+      border-color: rgba(67,240,143,.35);
+    }
+
     /* ── Incident table ──────────────────────────────────────────── */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; min-width: 780px; }
@@ -491,11 +547,13 @@
       .main-grid    { grid-template-columns: 1fr; }
       .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
       .charts-grid  { grid-template-columns: repeat(2, 1fr); }
+      .kpi-grid      { grid-template-columns: repeat(3, 1fr); }
     }
     @media (max-width: 640px) {
       .topbar       { flex-direction: column; align-items: flex-start; }
       .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
       .charts-grid  { grid-template-columns: 1fr; }
+      .kpi-grid      { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
 </head>
@@ -552,6 +610,40 @@
   </div>
 
   <!-- ── Main grid: incident + map ──────────────────────────────── -->
+  <p class="section-title">Cloud Analytics</p>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Incidents</div>
+      <div class="kpi-value" id="kpi-total">0</div>
+      <div class="kpi-sub">Supabase + live fallback</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Humans</div>
+      <div class="kpi-value" id="kpi-humans">0</div>
+      <div class="kpi-sub">Human classifications</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Animals</div>
+      <div class="kpi-value" id="kpi-animals">0</div>
+      <div class="kpi-sub">Animal classifications</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Vehicles</div>
+      <div class="kpi-value" id="kpi-vehicles">0</div>
+      <div class="kpi-sub">Vehicle classifications</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Critical Alerts</div>
+      <div class="kpi-value" id="kpi-critical">0</div>
+      <div class="kpi-sub">Critical or level 3+</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Ingest Latency</div>
+      <div class="kpi-value" id="kpi-latency">--</div>
+      <div class="kpi-sub" id="kpi-storage">CSV ready | Cloud pending</div>
+    </div>
+  </div>
+
   <div class="main-grid" style="margin-bottom:18px;">
 
     <!-- Current Intrusion -->
@@ -693,6 +785,18 @@
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Incidents per Hour</div>
+            <div class="card-sub">Recent detection cadence</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="hourChart"></canvas></div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── Incident Table ──────────────────────────────────────────── -->
@@ -703,6 +807,28 @@
         <div>
           <div class="card-title">Incident Log</div>
           <div class="card-sub">Last 20 incidents — auto-updating</div>
+        </div>
+        <div class="search-controls">
+          <select id="filter-classification">
+            <option value="">All Classes</option>
+            <option value="HUMAN">Human</option>
+            <option value="ANIMAL">Animal</option>
+            <option value="VEHICLE">Vehicle</option>
+          </select>
+          <select id="filter-threat">
+            <option value="">All Threats</option>
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH">High</option>
+            <option value="CRITICAL">Critical</option>
+          </select>
+          <select id="filter-window">
+            <option value="">All Time</option>
+            <option value="24">Last 24h</option>
+            <option value="1">Last 1h</option>
+          </select>
+          <button type="button" id="filter-apply">Apply</button>
+          <button type="button" id="filter-reset">Reset</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -806,6 +932,31 @@ const nodeChart = new Chart(document.getElementById('nodeChart'), {
     plugins: { ...chartDefaults.plugins, legend: { display: false } },
     scales: {
       x: { ticks: { color: '#7fa898' }, grid: { color: 'rgba(255,255,255,.04)' } },
+      y: { ticks: { color: '#7fa898', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.04)' } }
+    }
+  }
+});
+
+const hourChart = new Chart(document.getElementById('hourChart'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Incidents',
+      data: [],
+      borderColor: COLORS.cyan,
+      backgroundColor: 'rgba(114, 216, 255, 0.14)',
+      tension: 0.35,
+      fill: true,
+      pointRadius: 3,
+      pointBackgroundColor: COLORS.green
+    }]
+  },
+  options: {
+    ...chartDefaults,
+    plugins: { ...chartDefaults.plugins, legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#7fa898', maxRotation: 0 }, grid: { color: 'rgba(255,255,255,.04)' } },
       y: { ticks: { color: '#7fa898', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.04)' } }
     }
   }
@@ -927,6 +1078,45 @@ function updateCharts() {
   nodeChart.update('none');
 }
 
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function updateDashboardStats(stats) {
+  if (!stats || !stats.kpis) return;
+  const k = stats.kpis;
+  setText('kpi-total', k.totalIncidents ?? 0);
+  setText('kpi-humans', k.humans ?? 0);
+  setText('kpi-animals', k.animals ?? 0);
+  setText('kpi-vehicles', k.vehicles ?? 0);
+  setText('kpi-critical', k.criticalAlerts ?? 0);
+
+  const cls = stats.classificationDistribution || {};
+  classChart.data.datasets[0].data = [
+    cls.HUMAN || 0, cls.ANIMAL || 0, cls.VEHICLE || 0, cls.UNKNOWN || 0
+  ];
+  classChart.update('none');
+
+  const thr = stats.threatDistribution || {};
+  threatChart.data.datasets[0].data = [
+    thr.LOW || 0, thr.MEDIUM || 0, thr.HIGH || 0, thr.CRITICAL || 0
+  ];
+  threatChart.update('none');
+
+  const nodes = stats.nodeActivity || {};
+  nodeChart.data.datasets[0].data = [
+    nodes.SOUTH || 0, nodes.WEST || 0, nodes.NORTH || 0, nodes.EAST || 0
+  ];
+  nodeChart.update('none');
+
+  const hourly = stats.incidentsPerHour || {};
+  const labels = Object.keys(hourly).sort().slice(-12);
+  hourChart.data.labels = labels.map(label => label.slice(11, 16));
+  hourChart.data.datasets[0].data = labels.map(label => hourly[label] || 0);
+  hourChart.update('none');
+}
+
 // ── Accumulate counts from full history ──────────────────────────────────────
 function recount() {
   ['HUMAN','ANIMAL','VEHICLE','UNKNOWN'].forEach(k => classCounts[k] = 0);
@@ -972,7 +1162,7 @@ async function pollStatus() {
 
 async function pollHistory() {
   try {
-    const res = await fetch('/api/history');
+    const res = await fetch('/api/incidents?limit=100');
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data) && data.length !== history.length) {
@@ -985,13 +1175,54 @@ async function pollHistory() {
   } catch(e) { /* offline */ }
 }
 
+async function pollStats() {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) return;
+    updateDashboardStats(await res.json());
+  } catch(e) { /* offline */ }
+}
+
+async function applyFilters() {
+  const cls = document.getElementById('filter-classification').value;
+  const threat = document.getElementById('filter-threat').value;
+  const hours = document.getElementById('filter-window').value;
+  const params = new URLSearchParams({ limit: '100' });
+  if (cls) params.set('classification', cls);
+  if (threat) params.set('threat', threat);
+  if (hours) params.set('hours', hours);
+
+  try {
+    const res = await fetch('/api/search?' + params.toString());
+    if (!res.ok) return;
+    history = await res.json();
+    recount();
+    rebuildTable();
+    updateCharts();
+    if (history.length) updateIncidentPanel(history[0]);
+  } catch(e) { /* offline */ }
+}
+
+function resetFilters() {
+  document.getElementById('filter-classification').value = '';
+  document.getElementById('filter-threat').value = '';
+  document.getElementById('filter-window').value = '';
+  pollHistory();
+  pollStats();
+}
+
 // ── Polling intervals ────────────────────────────────────────────────────────
 pollStatus();
 pollCurrent();
 pollHistory();
+pollStats();
 setInterval(pollStatus,  1500);
 setInterval(pollCurrent, 2000);
 setInterval(pollHistory, 3000);
+setInterval(pollStats,   5000);
+
+document.getElementById('filter-apply').addEventListener('click', applyFilters);
+document.getElementById('filter-reset').addEventListener('click', resetFilters);
 
 // ── Server health indicator ──────────────────────────────────────────────────
 async function checkHealth() {
@@ -1003,7 +1234,15 @@ async function checkHealth() {
       badge.style.borderColor = 'rgba(67,240,143,.45)';
       badge.style.color       = 'var(--green)';
       badge.style.background  = 'rgba(67,240,143,.07)';
-      badge.textContent = data.mqtt_connected ? '⬤ Server + MQTT OK' : '⬤ Server OK · MQTT offline';
+      const cloud = data.supabase_enabled
+        ? (data.supabase_ok ? 'Cloud OK' : 'Cloud issue')
+        : 'Cloud off';
+      badge.textContent = data.mqtt_connected ? `Server + MQTT OK | ${cloud}` : `Server OK | MQTT offline | ${cloud}`;
+      const ingestMs = data.latency && data.latency.ingest_ms;
+      const csvMs = data.latency && data.latency.csv_ms;
+      const cloudMs = data.latency && data.latency.supabase_ms;
+      setText('kpi-latency', ingestMs == null ? '--' : `${ingestMs} ms`);
+      setText('kpi-storage', `CSV ${csvMs == null ? '--' : csvMs + ' ms'} | Cloud ${cloudMs == null ? cloud : cloudMs + ' ms'}`);
     }
   } catch {
     badge.style.borderColor = 'rgba(255,95,87,.4)';
