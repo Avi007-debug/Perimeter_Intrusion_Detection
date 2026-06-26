@@ -27,6 +27,7 @@ MQTT_BROKER      = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT        = int(os.getenv("MQTT_PORT", "1883"))
 INCIDENT_TOPIC   = "perimeter/incident"
 STATUS_TOPIC     = "perimeter/status"
+CONTROL_TOPIC    = "perimeter/control"
 HISTORY_MAXLEN   = int(os.getenv("HISTORY_MAXLEN", "100"))
 CSV_FILE         = os.path.join(os.path.dirname(__file__), "incidents.csv")
 SUPABASE_URL     = os.getenv("SUPABASE_URL", "").strip()
@@ -41,9 +42,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "").strip()
 
-import google.generativeai as genai
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+from google import genai
 
 # ── State (thread-safe via lock) ───────────────────────────────────────────────
 lock             = threading.Lock()
@@ -51,6 +50,7 @@ latest_incident  = {}
 latest_status    = {"south": False, "west": False, "north": False, "east": False}
 last_status_time = 0
 incident_history = deque(maxlen=HISTORY_MAXLEN)
+system_armed     = True  # Track if system is armed or disarmed
 storage_health   = {
     "csv_ok": True,
     "supabase_enabled": SUPABASE_ENABLED,
@@ -243,7 +243,7 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
 
 
 def on_message(client, userdata, msg):
-    global latest_incident, latest_status
+    global latest_incident, latest_status, system_armed, last_status_time
 
     payload = msg.payload.decode("utf-8", errors="ignore").strip()
     print(f"[MQTT] {msg.topic}: {payload}")
@@ -255,6 +255,11 @@ def on_message(client, userdata, msg):
         return
 
     if msg.topic == INCIDENT_TOPIC:
+        # Only process incidents if system is armed
+        if not system_armed:
+            print("[MQTT] System is disarmed, ignoring incident")
+            return
+        
         data.setdefault("receivedAt", datetime.now().astimezone().isoformat(timespec="seconds"))
         
         # 1. Immediately store in memory so dashboard sees it instantly
@@ -305,8 +310,15 @@ def on_message(client, userdata, msg):
         threading.Thread(target=_process_storage, args=(data,), daemon=True).start()
 
     elif msg.topic == STATUS_TOPIC:
+        # Only update status if system is armed
+        if not system_armed:
+            print("[MQTT] System is disarmed, clearing status")
+            with lock:
+                latest_status = {"south": False, "west": False, "north": False, "east": False}
+                last_status_time = time.time()
+            return
+        
         with lock:
-            global last_status_time
             latest_status = data
             last_status_time = time.time()
 
@@ -400,17 +412,82 @@ if telegram_bot:
             telegram_bot.answer_callback_query(call.id, "System Disarmed!")
             telegram_bot.edit_message_text(text="🎛 *SentinelMesh Control Panel*\n\nStatus: 🔴 *DISARMED*", 
                                            chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+        
+        elif call.data == "sys_unmute":
+            payload = json.dumps({"action": "unmute"})
+            mqtt_client.publish("perimeter/command", payload)
+            telegram_bot.answer_callback_query(call.id, "Buzzer Unmuted!")
+            telegram_bot.edit_message_text(text="🎛 *SentinelMesh Control Panel*\n\nStatus: 🔊 *BUZZER UNMUTED*", 
+                                           chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
 
-    @telegram_bot.message_handler(commands=['start', 'menu'])
+    @telegram_bot.message_handler(commands=['start', 'menu', 'help'])
     def send_menu(message):
         if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
             return
         kb = InlineKeyboardMarkup(row_width=2)
         kb.add(
             InlineKeyboardButton("🟢 Arm System", callback_data="sys_arm"),
-            InlineKeyboardButton("🔴 Disarm System", callback_data="sys_disarm")
+            InlineKeyboardButton("🔴 Disarm System", callback_data="sys_disarm"),
+            InlineKeyboardButton("🔕 Mute Buzzer", callback_data="mute_options"),
+            InlineKeyboardButton("🔊 Unmute Buzzer", callback_data="sys_unmute")
         )
-        telegram_bot.send_message(message.chat.id, "🎛 *SentinelMesh Control Panel*\n\nUse the buttons below to Arm or Disarm the physical hardware alerts globally.", parse_mode="Markdown", reply_markup=kb)
+        telegram_bot.send_message(message.chat.id, "🎛 *SentinelMesh Control Panel*\n\nUse the buttons below to control your perimeter system.\n\n*Available Commands:*\n/menu - Show this control panel\n/status - Get system status\n/help - Show help", parse_mode="Markdown", reply_markup=kb)
+    
+    @telegram_bot.message_handler(commands=['status'])
+    def send_status(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        
+        status_text = "📊 *System Status*\n\n"
+        status_text += f"System: {'🟢 Armed' if systemEnabled else '🔴 Disarmed'}\n"
+        status_text += f"Buzzer: {'🔕 Muted' if buzzerMutedUntil > time.time() * 1000 else '🔊 Active'}\n"
+        status_text += f"Incidents: {len(incident_history)}\n\n"
+        
+        with lock:
+            if latest_incident:
+                status_text += f"*Last Incident:*\n"
+                status_text += f"• Class: {latest_incident.get('classification', 'N/A')}\n"
+                status_text += f"• Threat: {latest_incident.get('threat', 'N/A')}\n"
+                status_text += f"• Confidence: {latest_incident.get('confidence', 0)}%\n"
+        
+        telegram_bot.send_message(message.chat.id, status_text, parse_mode="Markdown")
+    
+    @telegram_bot.message_handler(commands=['arm'])
+    def cmd_arm(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        payload = json.dumps({"action": "arm"})
+        mqtt_client.publish("perimeter/command", payload)
+        telegram_bot.send_message(message.chat.id, "🟢 System has been *ARMED*", parse_mode="Markdown")
+    
+    @telegram_bot.message_handler(commands=['disarm'])
+    def cmd_disarm(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        payload = json.dumps({"action": "disarm"})
+        mqtt_client.publish("perimeter/command", payload)
+        telegram_bot.send_message(message.chat.id, "🔴 System has been *DISARMED*", parse_mode="Markdown")
+    
+    @telegram_bot.message_handler(commands=['mute'])
+    def cmd_mute(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton("1 Min", callback_data="mute_60"),
+            InlineKeyboardButton("10 Min", callback_data="mute_600"),
+            InlineKeyboardButton("1 Hr", callback_data="mute_3600"),
+            InlineKeyboardButton("1 Day", callback_data="mute_86400")
+        )
+        telegram_bot.send_message(message.chat.id, "🔕 Select mute duration:", reply_markup=kb)
+    
+    @telegram_bot.message_handler(commands=['unmute'])
+    def cmd_unmute(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        payload = json.dumps({"action": "unmute"})
+        mqtt_client.publish("perimeter/command", payload)
+        telegram_bot.send_message(message.chat.id, "🔊 Buzzer has been *UNMUTED*", parse_mode="Markdown")
 
     def run_telegram_bot():
         while True:
@@ -455,9 +532,12 @@ CORS(app)   # allow browser fetch() from any origin during development
 
 
 @app.route("/")
-def dashboard():
-    """Serve the SentinelMesh AI dashboard."""
-    return send_from_directory(FRONTEND_DIR, "index.html")
+def index():
+    response = send_from_directory(FRONTEND_DIR, "index.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # ── Health / diagnostics ───────────────────────────────────────────────────────
@@ -486,13 +566,16 @@ def api_status():
     """Live node active/idle status."""
     with lock:
         return jsonify({
-            "nodes": latest_status,
+            "nodes": latest_status if system_armed else {"south": False, "west": False, "north": False, "east": False},
+            "systemArmed": system_armed,
             "last_updated": last_status_time
         })
 
 @app.route("/api/command", methods=["POST"])
 def api_command():
-    """Receive system commands (arm, disarm, mute) from the dashboard and publish to MQTT."""
+    """Receive system commands (arm, disarm, mute, unmute) from the dashboard and publish to MQTT."""
+    global system_armed
+    
     data = request.json
     if not data or "action" not in data:
         return jsonify({"error": "Invalid payload"}), 400
@@ -502,11 +585,21 @@ def api_command():
     
     if action == "arm":
         payload = {"action": "arm"}
+        with lock:
+            system_armed = True
+        print("[API] System ARMED - will now process incidents")
     elif action == "disarm":
         payload = {"action": "disarm"}
+        with lock:
+            global latest_status
+            system_armed = False
+            latest_status = {"south": False, "west": False, "north": False, "east": False}
+        print("[API] System DISARMED - clearing all updates")
     elif action == "mute":
         duration = int(data.get("duration_sec", 60))
         payload = {"action": "mute", "duration_sec": duration}
+    elif action == "unmute":
+        payload = {"action": "unmute"}
     else:
         return jsonify({"error": "Unknown action"}), 400
         
@@ -518,7 +611,7 @@ def api_gemini_report():
     if not GEMINI_API_KEY:
         return jsonify({"error": "Gemini API key not configured"}), 500
         
-    data = request.json
+    data = request.get_json(silent=True)
     if not data:
         with lock:
             data = latest_incident
@@ -527,7 +620,6 @@ def api_gemini_report():
         return jsonify({"error": "No incident data available."}), 400
         
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
         prompt = f"""
         Write a professional, concise security incident report based on the following telemetry data.
         The report should be exactly 2 paragraphs. Sound authoritative, like a security operations center (SOC) analyst.
@@ -543,8 +635,85 @@ def api_gemini_report():
         Duration: {data.get('durationSec', 0)} seconds
         Minimum Distance detected: {data.get('minDistance', 0)} cm
         """
-        response = model.generate_content(prompt)
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         return jsonify({"report": response.text.strip()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/gemini/summary", methods=["GET"])
+def api_gemini_summary():
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "Gemini API key not configured"}), 500
+        
+    try:
+        hours_str = request.args.get("hours", "24")
+        hours = int(hours_str) if hours_str.isdigit() else 24
+    except ValueError:
+        hours = 24
+        
+    # Gather data
+    limit = 100
+    rows = query_supabase_incidents(limit=limit, hours=hours)
+    if rows is not None:
+        incidents = [supabase_row_to_api(row) for row in rows]
+    else:
+        with lock:
+            # Fallback to local memory if supabase offline
+            # We don't have perfect hour filtering for local memory, so just use what's there
+            incidents = list(incident_history)[:limit]
+            
+    if not incidents:
+        return jsonify({"html": "<div>No incidents found in this time range to summarize.</div>"})
+        
+    # Serialize for prompt
+    data_str = ""
+    for i, inc in enumerate(incidents[:50]): # Cap at 50 to avoid prompt overflow
+        time_str = inc.get('createdAt') or inc.get('time', 'Unknown')
+        cls = inc.get('classification', 'Unknown')
+        thr = inc.get('threat', 'Unknown')
+        path = inc.get('path', 'Unknown')
+        data_str += f"- {time_str} | {cls} ({thr}) | Path: {path}\n"
+        
+    # Calculate time frame
+    end_time = datetime.now(timezone.utc)
+    start_time = end_time - timedelta(hours=hours)
+    
+    time_frame_str = f"From: {start_time.strftime('%Y-%m-%d %H:%M:%S UTC')} To: {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    
+    prompt = f"""
+    You are a Chief Security Officer (CSO) analyzing a perimeter intrusion detection system (SentinelMesh AI).
+    I am providing you with the telemetry logs for the selected timeframe.
+    Time Frame Selected: {time_frame_str}
+    (Capped at 50 events to prevent overflow).
+    
+    Please write a comprehensive, professional summary report. Identify any patterns (e.g. lots of vehicles, frequent alarms on the SOUTH node, etc). 
+    Explicitly mention the time frame ({time_frame_str}) at the beginning of your report.
+    
+    IMPORTANT: You must format your ENTIRE response using raw HTML tags so it can be injected directly into a webpage. 
+    Use tags like <h3>, <p>, <ul>, <li>, <b>, <span style="color:red">, etc. Do NOT use markdown. Do NOT wrap your response in ```html blocks.
+    
+    Incident Data:
+    {data_str}
+    """
+    
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        html_output = response.text.strip()
+        # Clean up any potential markdown code blocks if gemini disobeys
+        if html_output.startswith("```html"):
+            html_output = html_output[7:]
+        if html_output.endswith("```"):
+            html_output = html_output[:-3]
+            
+        return jsonify({"html": html_output.strip()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -561,6 +730,23 @@ def api_history():
     """Last 100 incidents, newest first."""
     with lock:
         return jsonify(list(incident_history))
+
+@app.route("/api/control", methods=["POST"])
+def api_control():
+    """Hardware command center endpoint."""
+    data = request.get_json(silent=True) or {}
+    command = data.get("command")
+    value = data.get("value")
+    
+    if not command:
+        return jsonify({"error": "No command provided"}), 400
+        
+    payload = {"command": command}
+    if value is not None:
+        payload["value"] = value
+        
+    mqtt_client.publish(CONTROL_TOPIC, json.dumps(payload))
+    return jsonify({"status": "success", "command": command})
 
 
 @app.route("/api/incidents")

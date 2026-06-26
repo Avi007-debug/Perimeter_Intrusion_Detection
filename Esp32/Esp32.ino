@@ -756,6 +756,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
         }
       }
     }
+    else if (message.indexOf("\"action\": \"unmute\"") != -1 || message.indexOf("\"action\":\"unmute\"") != -1) {
+      buzzerMutedUntil = 0;
+      Serial.println("[MQTT] Buzzer UNMUTED.");
+    }
     else if (message.indexOf("\"action\": \"arm\"") != -1 || message.indexOf("\"action\":\"arm\"") != -1) {
       systemEnabled = true;
       Serial.println("[MQTT] System ARMED.");

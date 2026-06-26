@@ -430,14 +430,14 @@
     /* ── Charts row ──────────────────────────────────────────────── */
     .charts-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 18px;
       margin-bottom: 18px;
     }
 
     .chart-wrap {
       position: relative;
-      height: 200px;
+      height: 260px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -445,7 +445,7 @@
 
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 14px;
       margin-bottom: 18px;
     }
@@ -587,13 +587,13 @@
       .main-grid    { grid-template-columns: 1fr; }
       .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
       .charts-grid  { grid-template-columns: repeat(2, 1fr); }
-      .kpi-grid      { grid-template-columns: repeat(3, 1fr); }
+      .kpi-grid     { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 640px) {
       .topbar       { flex-direction: column; align-items: flex-start; }
       .nodes-grid   { grid-template-columns: repeat(2, 1fr); }
       .charts-grid  { grid-template-columns: 1fr; }
-      .kpi-grid      { grid-template-columns: repeat(2, 1fr); }
+      .kpi-grid     { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -627,6 +627,7 @@
   <nav class="tabs-nav">
     <button class="tab-btn active" onclick="switchTab('live')">Live Surveillance</button>
     <button class="tab-btn" onclick="switchTab('analytics')">Historical Analytics</button>
+    <button class="tab-btn" onclick="switchTab('reports')">📝 AI Reports</button>
     <button class="tab-btn" onclick="switchTab('controls')">System Controls</button>
   </nav>
 
@@ -665,7 +666,7 @@
   </div>
 
   <!-- ── Main grid: incident + map ──────────────────────────────── -->
-  
+  <div class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-label">Humans</div>
       <div class="kpi-value" id="kpi-humans">0</div>
@@ -813,6 +814,8 @@
       <div class="kpi-value" id="kpi-total">0</div>
       <div class="kpi-sub">Supabase + live fallback</div>
     </div>
+  </div>
+
 <!-- ── Charts ──────────────────────────────────────────────────── -->
   <p class="section-title">Analytics</p>
   <div class="charts-grid">
@@ -921,6 +924,55 @@
       </div>
     </div>
   </div>
+
+  </div> <!-- end tab-analytics -->
+
+  <div id="tab-reports" class="tab-pane">
+    <div class="card" style="margin-bottom: 24px;">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Generate AI Summary Report</div>
+            <div class="card-sub">Compile historical data into a comprehensive SOC analysis using Gemini AI.</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 20px;">
+          <select id="report-timeframe" onchange="toggleCustomTimeframe()" style="padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,0.5); color: var(--text); border: 1px solid var(--border);">
+            <option value="24">Last 24 Hours</option>
+            <option value="168">Last 7 Days (168h)</option>
+            <option value="720">Last 30 Days (720h)</option>
+            <option value="custom">Custom (Hours)</option>
+          </select>
+          <input type="number" id="custom-hours" placeholder="Hrs" min="1" style="display: none; width: 80px; padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,0.5); color: var(--text); border: 1px solid var(--border);">
+          <button id="btn-summary" class="control-btn" style="background: rgba(192,132,252,0.15); color: #c084fc; border: 1px solid rgba(192,132,252,0.4); padding: 8px 24px; min-width: auto; font-size: 0.9rem;" onclick="generateSummaryReport()">✨ Generate Summary</button>
+        </div>
+        <div id="summary-report-container" style="display: none; padding: 24px; background: rgba(0,0,0,0.4); border-radius: 12px; border: 1px solid rgba(192,132,252,0.2); line-height: 1.6; font-size: 0.95rem; color: #ddd;">
+        </div>
+      </div>
+    </div>
+  </div> <!-- end tab-reports -->
+
+  <div id="tab-controls" class="tab-pane">
+    <div class="card" style="max-width: 600px; margin: 0 auto;">
+      <div class="card-inner">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Hardware Command Center</div>
+            <div class="card-sub">Remote control for perimeter nodes</div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <button class="control-btn btn-arm" onclick="sendCommand('arm')">🛡️ Arm System</button>
+          <button class="control-btn btn-disarm" onclick="sendCommand('disarm')">🔓 Disarm System</button>
+          <div style="display: flex; gap: 8px;">
+            <button class="control-btn btn-mute" style="flex: 1;" onclick="sendCommand('mute', 60)">🔕 Mute 1 Min</button>
+            <button class="control-btn btn-mute" style="flex: 1;" onclick="sendCommand('mute', 3600)">🔕 Mute 1 Hour</button>
+          </div>
+          <button class="control-btn" style="background: rgba(114,216,255,0.15); color: var(--cyan); border: 1px solid rgba(114,216,255,0.4);" onclick="sendCommand('unmute')">🔊 Unmute Buzzer</button>
+        </div>
+      </div>
+    </div>
+  </div> <!-- end tab-controls -->
 
 </div><!-- /shell -->
 
@@ -1078,34 +1130,60 @@ function updateIncidentPanel(inc) {
 }
 
 // ── Update node cards + map ──────────────────────────────────────────────────
-// Status payload is now: { "south":{"online":bool,"active":bool}, ... }
+// ── Update node cards + map ──────────────────────────────────────────────────
+// Status payload is now: { nodes: {}, systemArmed: bool, ... }
 function updateStatus(status) {
   const dirs = ['south', 'west', 'north', 'east'];
+  const systemArmed = status.systemArmed !== false;  // Default to armed if not specified
+  
   dirs.forEach(dir => {
-    const node   = status[dir] || {};
+    const statusData = status.nodes || {};
+    const node = statusData[dir] && typeof statusData[dir] === 'object' 
+      ? statusData[dir] 
+      : (status[dir] || {});
+    
     // Support both old flat bool and new nested object
     const online = (typeof node === 'object') ? !!node.online : !!node;
     const active = (typeof node === 'object') ? !!node.active : !!node;
+    
+    // If system is disarmed, always show as offline
+    const effectiveOnline = systemArmed && online;
+    const effectiveActive = systemArmed && active;
 
     const card  = document.getElementById('node-' + dir);
     const pill  = document.getElementById('pill-' + dir);
     const mnode = document.getElementById('mnode-' + dir);
 
     // Three states: offline (neither), idle-online (online only), detecting (active)
-    card.classList.toggle('online',       online && !active);
-    card.classList.toggle('alert-active', active);
-    mnode.classList.toggle('online',       online && !active);
-    mnode.classList.toggle('alert-active', active);
+    card.classList.remove('online', 'alert-active');
+    mnode.classList.remove('online', 'alert-active');
+    
+    if (effectiveOnline && !effectiveActive) {
+      card.classList.add('online');
+      mnode.classList.add('online');
+    } else if (effectiveActive) {
+      card.classList.add('online', 'alert-active');
+      mnode.classList.add('online', 'alert-active');
+    }
 
-    pill.textContent = !online ? 'Offline' : active ? 'Detecting' : 'Idle';
+    const displayText = !effectiveOnline ? 'Offline' : effectiveActive ? 'Detecting' : 'Idle';
+    pill.textContent = displayText;
   });
 
-  // Show SVG path line when any node is actively detecting
-  const anyActive = dirs.some(d => {
-    const n = status[d] || {};
-    return (typeof n === 'object') ? n.active : n;
-  });
-  document.getElementById('svgPath').classList.toggle('visible', anyActive);
+  // Show SVG path line when MULTIPLE nodes are actively detecting (only if armed)
+  if (!systemArmed) {
+    document.getElementById('svgPath').classList.remove('visible');
+    return;
+  }
+  
+  const statusData = status.nodes || {};
+  const activeCount = dirs.filter(d => {
+    const node = statusData[d] && typeof statusData[d] === 'object' 
+      ? statusData[d] 
+      : (status[d] || {});
+    return (typeof node === 'object') ? node.active : node;
+  }).length;
+  document.getElementById('svgPath').classList.toggle('visible', activeCount > 1);
 }
 
 // ── Rebuild incident table ────────────────────────────────────────────────────
@@ -1160,6 +1238,17 @@ function updateDashboardStats(stats) {
   setText('kpi-animals', k.animals ?? 0);
   setText('kpi-vehicles', k.vehicles ?? 0);
   setText('kpi-critical', k.criticalAlerts ?? 0);
+
+  const storageEl = document.getElementById('kpi-storage');
+  if (storageEl && stats.storageHealth) {
+    if (stats.storageHealth.supabase_ok) {
+      storageEl.textContent = 'CSV ready | Cloud connected';
+      storageEl.style.color = 'var(--green)';
+    } else {
+      storageEl.textContent = 'CSV ready | Cloud pending';
+      storageEl.style.color = 'var(--amber)';
+    }
+  }
 
   const cls = stats.classificationDistribution || {};
   classChart.data.datasets[0].data = [
@@ -1316,6 +1405,46 @@ document.getElementById('filter-reset').addEventListener('click', resetFilters);
       }
     };
 
+    window.toggleCustomTimeframe = function() {
+      const select = document.getElementById('report-timeframe');
+      const customInput = document.getElementById('custom-hours');
+      if (select.value === 'custom') {
+        customInput.style.display = 'block';
+      } else {
+        customInput.style.display = 'none';
+      }
+    };
+
+    window.generateSummaryReport = async function() {
+      const btn = document.getElementById('btn-summary');
+      const container = document.getElementById('summary-report-container');
+      let hours = document.getElementById('report-timeframe').value;
+      if (hours === 'custom') {
+        hours = document.getElementById('custom-hours').value || 24;
+      }
+      
+      btn.innerText = '✨ Generating...';
+      btn.disabled = true;
+      container.style.display = 'block';
+      container.innerHTML = '<div style="color:var(--muted); text-align:center;">Fetching historical data and querying Gemini AI... This may take a few seconds.</div>';
+      
+      try {
+        const res = await fetch(`/api/gemini/summary?hours=${hours}`);
+        const data = await res.json();
+        
+        if (data.error) {
+          container.innerHTML = `<span style="color:var(--red)">Error: ${data.error}</span>`;
+        } else {
+          container.innerHTML = data.html;
+        }
+      } catch (err) {
+        container.innerHTML = `<span style="color:var(--red)">Failed to reach server.</span>`;
+      } finally {
+        btn.innerText = '✨ Generate Summary';
+        btn.disabled = false;
+      }
+    };
+
     window.generateGeminiReport = async function() {
       const btn = document.getElementById('btn-gemini');
       const container = document.getElementById('gemini-report');
@@ -1326,7 +1455,11 @@ document.getElementById('filter-reset').addEventListener('click', resetFilters);
       container.innerHTML = '<span style="color:var(--muted)">Analyzing telemetry...</span>';
       
       try {
-        const res = await fetch('/api/gemini/report', { method: 'POST' });
+        const res = await fetch('/api/gemini/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
         const data = await res.json();
         
         if (data.error) {
