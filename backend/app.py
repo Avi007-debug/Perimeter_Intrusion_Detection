@@ -9,6 +9,8 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from collections import deque
+import urllib.request
+import urllib.parse
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
@@ -34,6 +36,8 @@ SUPABASE_KEY     = (
 SUPABASE_TABLE   = os.getenv("SUPABASE_INCIDENTS_TABLE", "incidents")
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY)
 supabase_client  = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_ENABLED else None
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 # ── State (thread-safe via lock) ───────────────────────────────────────────────
 lock             = threading.Lock()
@@ -244,50 +248,96 @@ def on_message(client, userdata, msg):
         return
 
     if msg.topic == INCIDENT_TOPIC:
-        ingest_started = time.perf_counter()
         data.setdefault("receivedAt", datetime.now().astimezone().isoformat(timespec="seconds"))
-        csv_latency_ms = None
-        supabase_latency_ms = None
-        supabase_status = "disabled"
-
-        try:
-            csv_latency_ms = log_incident_csv(data)
-            storage_health["csv_ok"] = True
-            storage_health["last_csv_latency_ms"] = csv_latency_ms
-        except Exception as exc:
-            storage_health["csv_ok"] = False
-            storage_health["last_error"] = f"CSV: {exc}"
-            print(f"[CSV] Write failed: {exc}")
-
-        try:
-            cloud_row, supabase_latency_ms = log_incident_supabase(data)
-            if cloud_row:
-                data["id"] = cloud_row.get("id")
-                data["createdAt"] = cloud_row.get("created_at")
-            supabase_status = "ok" if supabase_client else "disabled"
-            storage_health["supabase_ok"] = True if supabase_client else None
-            storage_health["last_supabase_latency_ms"] = supabase_latency_ms
-        except Exception as exc:
-            supabase_status = "error"
-            storage_health["supabase_ok"] = False
-            storage_health["last_error"] = f"Supabase: {exc}"
-            print(f"[Supabase] Insert failed: {exc}")
-
-        total_latency_ms = round((time.perf_counter() - ingest_started) * 1000, 2)
-        data["csvLatencyMs"] = csv_latency_ms
-        data["supabaseLatencyMs"] = supabase_latency_ms
-        data["ingestLatencyMs"] = total_latency_ms
-        data["storageStatus"] = supabase_status
-        storage_health["last_total_ingest_latency_ms"] = total_latency_ms
-
+        
+        # 1. Immediately store in memory so dashboard sees it instantly
         with lock:
             latest_incident = data
             incident_history.appendleft(data)      # newest first
+
+        # 2. Trigger telegram alert in background
+        threading.Thread(target=send_telegram_alert, args=(data,), daemon=True).start()
+
+        # 3. Handle slow I/O (CSV & Supabase) in background so MQTT doesn't block!
+        def _process_storage(inc_data):
+            ingest_started = time.perf_counter()
+            csv_latency_ms = None
+            supabase_latency_ms = None
+            supabase_status = "disabled"
+
+            try:
+                csv_latency_ms = log_incident_csv(inc_data)
+                storage_health["csv_ok"] = True
+                storage_health["last_csv_latency_ms"] = csv_latency_ms
+            except Exception as exc:
+                storage_health["csv_ok"] = False
+                storage_health["last_error"] = f"CSV: {exc}"
+                print(f"[CSV] Write failed: {exc}")
+
+            try:
+                cloud_row, supabase_latency_ms = log_incident_supabase(inc_data)
+                if cloud_row:
+                    inc_data["id"] = cloud_row.get("id")
+                    inc_data["createdAt"] = cloud_row.get("created_at")
+                supabase_status = "ok" if supabase_client else "disabled"
+                storage_health["supabase_ok"] = True if supabase_client else None
+                storage_health["last_supabase_latency_ms"] = supabase_latency_ms
+            except Exception as exc:
+                supabase_status = "error"
+                storage_health["supabase_ok"] = False
+                storage_health["last_error"] = f"Supabase: {exc}"
+                print(f"[Supabase] Insert failed: {exc}")
+
+            total_latency_ms = round((time.perf_counter() - ingest_started) * 1000, 2)
+            inc_data["csvLatencyMs"] = csv_latency_ms
+            inc_data["supabaseLatencyMs"] = supabase_latency_ms
+            inc_data["ingestLatencyMs"] = total_latency_ms
+            inc_data["storageStatus"] = supabase_status
+            storage_health["last_total_ingest_latency_ms"] = total_latency_ms
+
+        threading.Thread(target=_process_storage, args=(data,), daemon=True).start()
 
     elif msg.topic == STATUS_TOPIC:
         with lock:
             latest_status = data
 
+
+# ── Telegram Alerts ───────────────────────────────────────────────────────────
+def send_telegram_alert(data: dict):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    
+    threat = (data.get("threat") or "UNKNOWN").upper()
+    if threat not in ["HIGH", "CRITICAL"]:
+        return
+        
+    classification = data.get("classification", "UNKNOWN")
+    confidence = data.get("confidence", "?")
+    path = (data.get("path") or "UNKNOWN").replace("->", "→")
+    time_str = data.get("receivedAt", "")
+    if time_str:
+        # Just grab HH:MM:SS
+        time_str = time_str.split("T")[-1][:8]
+        
+    msg = f"🚨 *SentinelMesh Alert*\n\n"
+    msg += f"Classification: {classification}\n"
+    msg += f"Threat: {threat}\n"
+    msg += f"Confidence: {confidence}%\n\n"
+    msg += f"Path:\n{path}\n\n"
+    msg += f"Time:\n{time_str}"
+    
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = urllib.parse.urlencode({
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": msg,
+        "parse_mode": "Markdown"
+    }).encode("utf-8")
+    
+    try:
+        req = urllib.request.Request(url, data=payload, method="POST")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[Telegram] Failed to send alert: {e}")
 
 # ── MQTT client (background thread) ───────────────────────────────────────────
 mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)

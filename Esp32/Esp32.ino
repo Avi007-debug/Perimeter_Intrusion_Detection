@@ -6,7 +6,7 @@
 // ── MQTT / WiFi credentials ──────────────────────────────────────
 const char* WIFI_SSID     = "Avi's Nord 5G";
 const char* WIFI_PASSWORD = "Avi@9322564784";
-const char* MQTT_BROKER   = "10.223.253.189";  
+const char* MQTT_BROKER   = "10.69.186.189";  
 const int   MQTT_PORT     = 1883;
 
 WiFiClient   wifiClient;
@@ -25,7 +25,7 @@ unsigned long lastMqttAttemptMs = 0;   // throttle MQTT reconnect attempts
 #define ECHO_PIN  15
 
 #define DIST_THRESHOLD 50
-#define PATH_TIMEOUT_MS 10000
+#define PATH_TIMEOUT_MS 4000
 #define MAX_EVENTS      10
 #define MAX_INCIDENTS   10
 #define CLASS_NAME_SIZE  12
@@ -340,10 +340,10 @@ RuleResult classifyIncident(unsigned long durationMs,
 
   // 6. Average Move Time (Speed)
   if(nodeCount >= 2 && avgMoveTime > 0) {
-    if(avgMoveTime < 1.5) {
+    if(avgMoveTime < 3.0) {
       vehicleScore += 25;
       humanScore += 5;
-    } else if(avgMoveTime < 4.0) {
+    } else if(avgMoveTime < 8.0) {
       humanScore += 20;
       animalScore += 5;
     } else {
@@ -377,8 +377,8 @@ RuleResult classifyIncident(unsigned long durationMs,
   }
 
   // Vehicle confirmation (Test 3):
-  // Very fast movement across multiple nodes
-  if(nodeCount >= 2 && avgMoveTime > 0 && avgMoveTime < 1.5) {
+  // Movement across 3 or more nodes within ~3.0 seconds
+  if(nodeCount >= 3 && avgMoveTime > 0 && avgMoveTime < 3.0) {
     vehicleScore += 20;
   }
 
@@ -1008,41 +1008,28 @@ if(eastActive && !prevEastActive)
 
   int alertLevel = 0;
 
-  if(activeNodes >= 2)
+  bool anyVib = (localVib || westData.vib_recent || northData.vib_recent || eastData.vib_recent);
+  bool anyClose = (localDist < DIST_THRESHOLD || westData.distance < DIST_THRESHOLD || northData.distance < DIST_THRESHOLD || eastData.distance < DIST_THRESHOLD);
+
+  if(activeNodes >= 3)
   {
-    alertLevel = 3;
+    alertLevel = 3; // Wide area intrusion = Level 3
   }
-  else if(
-       (
-        localDist < DIST_THRESHOLD &&
-        localPir &&
-        localVib
-       )
-       ||
-       (
-        westData.distance < DIST_THRESHOLD &&
-        westData.pir_recent &&
-        westData.vib_recent
-       )
-       ||
-       (
-        northData.distance < DIST_THRESHOLD &&
-        northData.pir_recent &&
-        northData.vib_recent
-       )
-       ||
-       (
-        eastData.distance < DIST_THRESHOLD &&
-        eastData.pir_recent &&
-        eastData.vib_recent
-       )
-  )
+  else if(activeNodes == 2)
   {
-    alertLevel = 2;
+    if(anyVib || anyClose)
+      alertLevel = 3; // 2 nodes + vibration or close proximity = Level 3
+    else
+      alertLevel = 2; // 2 nodes motion only = Level 2
   }
   else if(activeNodes == 1)
   {
-    alertLevel = 1;
+    if(anyVib && anyClose)
+      alertLevel = 3; // 1 node but vibrating AND close = Level 3 (Tampering)
+    else if(anyVib || anyClose)
+      alertLevel = 2; // 1 node but vibrating OR close = Level 2
+    else
+      alertLevel = 1; // 1 node motion only, far away = Level 1
   }
 
   if(alertLevel > pathMaxAlertLevel)
