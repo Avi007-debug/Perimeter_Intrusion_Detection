@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 from collections import deque
 import urllib.request
 import urllib.parse
-
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 import paho.mqtt.client as mqtt
@@ -302,21 +303,34 @@ def on_message(client, userdata, msg):
             latest_status = data
 
 
-# ── Telegram Alerts ───────────────────────────────────────────────────────────
+# ── Telegram Alerts & Bot ───────────────────────────────────────────────────────────
+telegram_bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN) if TELEGRAM_BOT_TOKEN else None
+alert_timestamps = deque(maxlen=15)
+
 def send_telegram_alert(data: dict):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    if not telegram_bot or not TELEGRAM_CHAT_ID:
         return
     
     threat = (data.get("threat") or "UNKNOWN").upper()
     if threat not in ["HIGH", "CRITICAL"]:
         return
         
+    # Rate limiter: max 15 alerts per 60 seconds
+    now = time.time()
+    while alert_timestamps and now - alert_timestamps[0] > 60:
+        alert_timestamps.popleft()
+        
+    if len(alert_timestamps) >= 15:
+        print("[Telegram] Rate limit exceeded, dropping alert.")
+        return
+        
+    alert_timestamps.append(now)
+        
     classification = data.get("classification", "UNKNOWN")
     confidence = data.get("confidence", "?")
     path = (data.get("path") or "UNKNOWN").replace("->", "→")
     time_str = data.get("receivedAt", "")
     if time_str:
-        # Just grab HH:MM:SS
         time_str = time_str.split("T")[-1][:8]
         
     msg = f"🚨 *SentinelMesh Alert*\n\n"
@@ -326,18 +340,79 @@ def send_telegram_alert(data: dict):
     msg += f"Path:\n{path}\n\n"
     msg += f"Time:\n{time_str}"
     
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    }).encode("utf-8")
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("🔕 Mute Buzzer & Alerts", callback_data="mute_options"))
     
     try:
-        req = urllib.request.Request(url, data=payload, method="POST")
-        urllib.request.urlopen(req, timeout=5)
+        telegram_bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode="Markdown", reply_markup=keyboard)
     except Exception as e:
         print(f"[Telegram] Failed to send alert: {e}")
+
+if telegram_bot:
+    @telegram_bot.callback_query_handler(func=lambda call: True)
+    def handle_mute_callback(call):
+        if call.data == "mute_options":
+            kb = InlineKeyboardMarkup(row_width=2)
+            kb.add(
+                InlineKeyboardButton("1 Min", callback_data="mute_60"),
+                InlineKeyboardButton("10 Min", callback_data="mute_600"),
+                InlineKeyboardButton("1 Hr", callback_data="mute_3600"),
+                InlineKeyboardButton("1 Day", callback_data="mute_86400"),
+                InlineKeyboardButton("Cancel", callback_data="mute_cancel")
+            )
+            telegram_bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=kb)
+        
+        elif call.data.startswith("mute_"):
+            val = call.data.split("_")[1]
+            if val == "cancel":
+                kb = InlineKeyboardMarkup()
+                kb.add(InlineKeyboardButton("🔕 Mute Buzzer & Alerts", callback_data="mute_options"))
+                telegram_bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=kb)
+                telegram_bot.answer_callback_query(call.id, "Cancelled mute.")
+            else:
+                duration = int(val)
+                payload = json.dumps({"action": "mute", "duration_sec": duration})
+                mqtt_client.publish("perimeter/command", payload)
+                
+                telegram_bot.answer_callback_query(call.id, f"Muted system for {duration}s!")
+                
+                new_text = call.message.text + f"\n\n🔕 System muted for {duration}s."
+                telegram_bot.edit_message_text(text=new_text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+        
+        elif call.data == "sys_arm":
+            payload = json.dumps({"action": "arm"})
+            mqtt_client.publish("perimeter/command", payload)
+            telegram_bot.answer_callback_query(call.id, "System Armed!")
+            telegram_bot.edit_message_text(text="🎛 *SentinelMesh Control Panel*\n\nStatus: 🟢 *ARMED*", 
+                                           chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+        
+        elif call.data == "sys_disarm":
+            payload = json.dumps({"action": "disarm"})
+            mqtt_client.publish("perimeter/command", payload)
+            telegram_bot.answer_callback_query(call.id, "System Disarmed!")
+            telegram_bot.edit_message_text(text="🎛 *SentinelMesh Control Panel*\n\nStatus: 🔴 *DISARMED*", 
+                                           chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+
+    @telegram_bot.message_handler(commands=['start', 'menu'])
+    def send_menu(message):
+        if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
+            return
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton("🟢 Arm System", callback_data="sys_arm"),
+            InlineKeyboardButton("🔴 Disarm System", callback_data="sys_disarm")
+        )
+        telegram_bot.send_message(message.chat.id, "🎛 *SentinelMesh Control Panel*\n\nUse the buttons below to Arm or Disarm the physical hardware alerts globally.", parse_mode="Markdown", reply_markup=kb)
+
+    def run_telegram_bot():
+        while True:
+            try:
+                telegram_bot.polling(none_stop=True)
+            except Exception as e:
+                print(f"[Telegram] Bot crashed: {e}")
+                time.sleep(5)
+                
+    threading.Thread(target=run_telegram_bot, daemon=True).start()
 
 # ── MQTT client (background thread) ───────────────────────────────────────────
 mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)

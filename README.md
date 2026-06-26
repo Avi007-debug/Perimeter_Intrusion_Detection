@@ -8,6 +8,14 @@ SentinelMesh AI is a real-time smart perimeter intrusion detection system powere
 - `backend/`: Flask-based MQTT Bridge & REST API. It listens to MQTT topics, logs data to a local CSV and a Supabase database, and serves the dashboard.
 - `ESP32/` & `ESP8266/`: Microcontroller code for the sensor nodes and the gateway.
 
+## 🆕 Recent Updates
+- **Dashboard CSV Export:** Added a direct "Export CSV" button for Phase 6 Machine Learning dataset collection.
+- **Asynchronous Storage:** Moved Supabase uploads to a background thread to prevent the MQTT client from blocking and dropping incident packets.
+- **Improved Alert Level Distribution:** Completely rewrote the alert level logic. Normal motion scales slowly (Level 1 -> 2), but severe tampering (Vibration + close proximity) or wide-area intrusions (3+ nodes) instantly trigger the Level 3 solid alarm.
+- **Responsive Vehicle Tracking:** Relaxed the `avgMoveTime` for Vehicle classification to `3.0s` and reduced `PATH_TIMEOUT_MS` to `4000ms` for snappier real-time dashboard updates during live demos.
+- **Interactive Telegram Bot:** Added `pyTelegramBotAPI` integration. Alerts now include inline buttons to temporarily mute the physical hardware buzzer.
+- **Telegram Rate Limiting:** Built-in rate limiter blocks bursts of more than 15 alerts per minute, protecting against API bans.
+
 ---
 
 ## 🚀 Setup & Installation

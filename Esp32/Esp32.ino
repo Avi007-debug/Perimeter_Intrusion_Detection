@@ -119,6 +119,8 @@ bool prevWestVib  = false;
 bool prevNorthVib = false;
 bool prevEastVib  = false;
 int currentAlertLevel = 0;
+unsigned long buzzerMutedUntil = 0;
+bool systemEnabled = true;
 
 String nodeName(uint8_t node);
 
@@ -732,8 +734,40 @@ String nodeName(uint8_t node)
   return "UNKNOWN";
 }
 
+void onMqttMessage(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  
+  if (String(topic) == "perimeter/command") {
+    if (message.indexOf("\"action\": \"mute\"") != -1 || message.indexOf("\"action\":\"mute\"") != -1) {
+      int durationIndex = message.indexOf("\"duration_sec\"");
+      if (durationIndex != -1) {
+        int colonIndex = message.indexOf(":", durationIndex);
+        int endIndex = message.indexOf("}", colonIndex);
+        if (colonIndex != -1 && endIndex != -1) {
+          String durationStr = message.substring(colonIndex + 1, endIndex);
+          int durationSec = durationStr.toInt();
+          buzzerMutedUntil = millis() + (durationSec * 1000UL);
+          Serial.print("[MQTT] Buzzer muted for ");
+          Serial.print(durationSec);
+          Serial.println(" seconds.");
+        }
+      }
+    }
+    else if (message.indexOf("\"action\": \"arm\"") != -1 || message.indexOf("\"action\":\"arm\"") != -1) {
+      systemEnabled = true;
+      Serial.println("[MQTT] System ARMED.");
+    }
+    else if (message.indexOf("\"action\": \"disarm\"") != -1 || message.indexOf("\"action\":\"disarm\"") != -1) {
+      systemEnabled = false;
+      Serial.println("[MQTT] System DISARMED.");
+    }
+  }
+}
+
 // ── MQTT helpers ─────────────────────────────────────────────────
-// Non-blocking: one attempt every 10 s only. ESP-NOW always runs regardless.
 void mqttConnect()
 {
   static bool abandonMqtt = false;
@@ -748,7 +782,10 @@ void mqttConnect()
   Serial.print("[MQTT] Connecting...");
 
   if (mqttClient.connect("SentinelMesh-Gateway"))
+  {
     Serial.println(" connected.");
+    mqttClient.subscribe("perimeter/command");
+  }
   else
   {
     Serial.print(" failed, rc=");
@@ -865,6 +902,7 @@ void setup()
     Serial.println(WiFi.channel());
     // ── MQTT only configured when WiFi is actually up
     mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttClient.setCallback(onMqttMessage);
     mqttConnect();
   }
   else
@@ -1008,8 +1046,8 @@ if(eastActive && !prevEastActive)
 
   int alertLevel = 0;
 
-  bool anyVib = (localVib || westData.vib_recent || northData.vib_recent || eastData.vib_recent);
-  bool anyClose = (localDist < DIST_THRESHOLD || westData.distance < DIST_THRESHOLD || northData.distance < DIST_THRESHOLD || eastData.distance < DIST_THRESHOLD);
+  bool anyVib = ( (southActive && localVib) || (westActive && westData.vib_recent) || (northActive && northData.vib_recent) || (eastActive && eastData.vib_recent) );
+  bool anyClose = ( (southActive && localDist < DIST_THRESHOLD) || (westActive && westData.distance < DIST_THRESHOLD) || (northActive && northData.distance < DIST_THRESHOLD) || (eastActive && eastData.distance < DIST_THRESHOLD) );
 
   if(activeNodes >= 3)
   {
@@ -1048,9 +1086,13 @@ if(eastActive && !prevEastActive)
        millis() - lastDetection < 5000
       );
 
-  if(!alertActive)
+  if(!alertActive || !systemEnabled)
   {
-    digitalWrite(GREEN_LED, HIGH);
+    if (!systemEnabled) {
+      digitalWrite(GREEN_LED, LOW); // System off
+    } else {
+      digitalWrite(GREEN_LED, HIGH); // System idle and armed
+    }
     digitalWrite(RED_LED, LOW);
     digitalWrite(BUZZER, LOW);
 
@@ -1063,7 +1105,7 @@ if(eastActive && !prevEastActive)
 
     if(currentAlertLevel == 1)
     {
-      digitalWrite(BUZZER, HIGH);
+      if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
       delay(200);
 
       digitalWrite(BUZZER, LOW);
@@ -1074,7 +1116,7 @@ if(eastActive && !prevEastActive)
       // Fast triple-beep for level 2 — clearly audible & urgent
       for(int b = 0; b < 5; b++)
       {
-        digitalWrite(BUZZER, HIGH);
+        if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
         delay(40);
         digitalWrite(BUZZER, LOW);
         delay(40);
@@ -1083,7 +1125,7 @@ if(eastActive && !prevEastActive)
     }
     else if(currentAlertLevel == 3)
     {
-      digitalWrite(BUZZER, HIGH);
+      if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
     }
   }
 
