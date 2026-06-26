@@ -542,6 +542,46 @@
       color: var(--muted); font-size: 0.9rem;
     }
 
+    /* ── Tabs & Offline Banner ───────────────────────────────────── */
+    .tabs-nav {
+      display: flex; gap: 10px; margin-bottom: 24px;
+      border-bottom: 1px solid var(--border); padding-bottom: 16px;
+    }
+    .tab-btn {
+      background: transparent; border: none; color: var(--muted);
+      font: 700 0.85rem var(--font); text-transform: uppercase;
+      letter-spacing: 0.1em; padding: 8px 16px; cursor: pointer;
+      border-radius: 8px; transition: 0.3s;
+    }
+    .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .tab-btn.active { color: var(--green); background: rgba(67,240,143,0.1); }
+    .tab-pane { display: none; animation: fadeIn 0.4s; }
+    .tab-pane.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .offline-banner {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(20, 5, 5, 0.9); backdrop-filter: blur(8px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--red); opacity: 0; pointer-events: none; transition: 0.5s;
+    }
+    .offline-banner.active { opacity: 1; pointer-events: auto; }
+    .offline-banner h1 { font-size: 3rem; font-weight: 900; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 16px; text-shadow: 0 0 40px rgba(255,95,87,0.6); }
+    .offline-banner p { color: var(--muted); font-size: 1.1rem; }
+
+    .control-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 14px 24px; border-radius: 12px; font: 700 1rem var(--font);
+      letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer;
+      transition: 0.3s; border: none; min-width: 180px;
+    }
+    .btn-arm { background: rgba(67,240,143,0.15); color: var(--green); border: 1px solid rgba(67,240,143,0.4); }
+    .btn-arm:hover { background: rgba(67,240,143,0.25); box-shadow: 0 0 20px rgba(67,240,143,0.2); }
+    .btn-disarm { background: rgba(255,95,87,0.15); color: var(--red); border: 1px solid rgba(255,95,87,0.4); }
+    .btn-disarm:hover { background: rgba(255,95,87,0.25); box-shadow: 0 0 20px rgba(255,95,87,0.2); }
+    .btn-mute { background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid rgba(255,255,255,0.2); }
+    .btn-mute:hover { background: rgba(255,255,255,0.1); }
+
     /* ── Responsive ──────────────────────────────────────────────── */
     @media (max-width: 1024px) {
       .main-grid    { grid-template-columns: 1fr; }
@@ -558,6 +598,12 @@
   </style>
 </head>
 <body>
+
+<div id="offlineBanner" class="offline-banner">
+  <h1>System Offline</h1>
+  <p>The gateway node is not responding. Check power and WiFi.</p>
+</div>
+
 <div class="shell">
 
   <!-- ── Topbar ──────────────────────────────────────────────────── -->
@@ -576,7 +622,16 @@
     </div>
   </header>
 
-  <!-- ── Node Cards ───────────────────────────────────────────────── -->
+  
+  <!-- ── Tabs Navigation ─────────────────────────────────────────── -->
+  <nav class="tabs-nav">
+    <button class="tab-btn active" onclick="switchTab('live')">Live Surveillance</button>
+    <button class="tab-btn" onclick="switchTab('analytics')">Historical Analytics</button>
+    <button class="tab-btn" onclick="switchTab('controls')">System Controls</button>
+  </nav>
+
+  <div id="tab-live" class="tab-pane active">
+<!-- ── Node Cards ───────────────────────────────────────────────── -->
   <p class="section-title">Node Status</p>
   <div class="nodes-grid">
     <div class="node-card" id="node-south">
@@ -610,13 +665,7 @@
   </div>
 
   <!-- ── Main grid: incident + map ──────────────────────────────── -->
-  <p class="section-title">Cloud Analytics</p>
-  <div class="kpi-grid">
-    <div class="kpi-card">
-      <div class="kpi-label">Total Incidents</div>
-      <div class="kpi-value" id="kpi-total">0</div>
-      <div class="kpi-sub">Supabase + live fallback</div>
-    </div>
+  
     <div class="kpi-card">
       <div class="kpi-label">Humans</div>
       <div class="kpi-value" id="kpi-humans">0</div>
@@ -745,7 +794,18 @@
     </div>
   </div>
 
-  <!-- ── Charts ──────────────────────────────────────────────────── -->
+  
+  </div> <!-- end tab-live -->
+
+  <div id="tab-analytics" class="tab-pane">
+<p class="section-title">Cloud Analytics</p>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Incidents</div>
+      <div class="kpi-value" id="kpi-total">0</div>
+      <div class="kpi-sub">Supabase + live fallback</div>
+    </div>
+<!-- ── Charts ──────────────────────────────────────────────────── -->
   <p class="section-title">Analytics</p>
   <div class="charts-grid">
 

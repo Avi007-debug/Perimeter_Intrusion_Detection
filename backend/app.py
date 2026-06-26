@@ -44,6 +44,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 lock             = threading.Lock()
 latest_incident  = {}
 latest_status    = {"south": False, "west": False, "north": False, "east": False}
+last_status_time = 0
 incident_history = deque(maxlen=HISTORY_MAXLEN)
 storage_health   = {
     "csv_ok": True,
@@ -300,7 +301,9 @@ def on_message(client, userdata, msg):
 
     elif msg.topic == STATUS_TOPIC:
         with lock:
+            global last_status_time
             latest_status = data
+            last_status_time = time.time()
 
 
 # ── Telegram Alerts & Bot ───────────────────────────────────────────────────────────
@@ -477,7 +480,33 @@ def api_health():
 def api_status():
     """Live node active/idle status."""
     with lock:
-        return jsonify(latest_status)
+        return jsonify({
+            "nodes": latest_status,
+            "last_updated": last_status_time
+        })
+
+@app.route("/api/command", methods=["POST"])
+def api_command():
+    """Receive system commands (arm, disarm, mute) from the dashboard and publish to MQTT."""
+    data = request.json
+    if not data or "action" not in data:
+        return jsonify({"error": "Invalid payload"}), 400
+        
+    action = data["action"]
+    payload = {}
+    
+    if action == "arm":
+        payload = {"action": "arm"}
+    elif action == "disarm":
+        payload = {"action": "disarm"}
+    elif action == "mute":
+        duration = int(data.get("duration_sec", 60))
+        payload = {"action": "mute", "duration_sec": duration}
+    else:
+        return jsonify({"error": "Unknown action"}), 400
+        
+    mqtt_client.publish("perimeter/command", json.dumps(payload))
+    return jsonify({"status": "ok", "message": f"Command '{action}' published"})
 
 
 @app.route("/api/current")
