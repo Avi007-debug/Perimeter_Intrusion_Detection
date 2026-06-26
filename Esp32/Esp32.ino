@@ -757,7 +757,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
       }
     }
     else if (message.indexOf("\"action\": \"unmute\"") != -1 || message.indexOf("\"action\":\"unmute\"") != -1) {
-      buzzerMutedUntil = 0;
+      buzzerMutedUntil = 0;  // Set to 0 so millis() > 0 allows buzzer
       Serial.println("[MQTT] Buzzer UNMUTED.");
     }
     else if (message.indexOf("\"action\": \"arm\"") != -1 || message.indexOf("\"action\":\"arm\"") != -1) {
@@ -1110,7 +1110,7 @@ if(eastActive && !prevEastActive)
     if(currentAlertLevel == 1)
     {
       // Slow beeping
-      if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
+      if(millis() >= buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
       delay(500);
       digitalWrite(BUZZER, LOW);
       delay(500);
@@ -1120,7 +1120,7 @@ if(eastActive && !prevEastActive)
       // Burst beeping
       for(int b = 0; b < 3; b++)
       {
-        if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
+        if(millis() >= buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
         delay(80);
         digitalWrite(BUZZER, LOW);
         delay(80);
@@ -1130,7 +1130,7 @@ if(eastActive && !prevEastActive)
     else if(currentAlertLevel == 3)
     {
       // Continuous
-      if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
+      if(millis() >= buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
     }
   }
 

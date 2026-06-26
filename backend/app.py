@@ -51,6 +51,7 @@ latest_status    = {"south": False, "west": False, "north": False, "east": False
 last_status_time = 0
 incident_history = deque(maxlen=HISTORY_MAXLEN)
 system_armed     = True  # Track if system is armed or disarmed
+buzzer_muted_until = 0   # Track buzzer mute timestamp
 storage_health   = {
     "csv_ok": True,
     "supabase_enabled": SUPABASE_ENABLED,
@@ -371,6 +372,8 @@ def send_telegram_alert(data: dict):
 if telegram_bot:
     @telegram_bot.callback_query_handler(func=lambda call: True)
     def handle_mute_callback(call):
+        global buzzer_muted_until
+        
         if call.data == "mute_options":
             kb = InlineKeyboardMarkup(row_width=2)
             kb.add(
@@ -391,6 +394,7 @@ if telegram_bot:
                 telegram_bot.answer_callback_query(call.id, "Cancelled mute.")
             else:
                 duration = int(val)
+                buzzer_muted_until = time.time() + duration
                 payload = json.dumps({"action": "mute", "duration_sec": duration})
                 mqtt_client.publish("perimeter/command", payload)
                 
@@ -414,6 +418,7 @@ if telegram_bot:
                                            chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
         
         elif call.data == "sys_unmute":
+            buzzer_muted_until = 0
             payload = json.dumps({"action": "unmute"})
             mqtt_client.publish("perimeter/command", payload)
             telegram_bot.answer_callback_query(call.id, "Buzzer Unmuted!")
@@ -439,8 +444,8 @@ if telegram_bot:
             return
         
         status_text = "📊 *System Status*\n\n"
-        status_text += f"System: {'🟢 Armed' if systemEnabled else '🔴 Disarmed'}\n"
-        status_text += f"Buzzer: {'🔕 Muted' if buzzerMutedUntil > time.time() * 1000 else '🔊 Active'}\n"
+        status_text += f"System: {'🟢 Armed' if system_armed else '🔴 Disarmed'}\n"
+        status_text += f"Buzzer: {'🔕 Muted' if buzzer_muted_until > time.time() else '🔊 Active'}\n"
         status_text += f"Incidents: {len(incident_history)}\n\n"
         
         with lock:
@@ -483,8 +488,10 @@ if telegram_bot:
     
     @telegram_bot.message_handler(commands=['unmute'])
     def cmd_unmute(message):
+        global buzzer_muted_until
         if str(message.chat.id) != str(TELEGRAM_CHAT_ID):
             return
+        buzzer_muted_until = 0
         payload = json.dumps({"action": "unmute"})
         mqtt_client.publish("perimeter/command", payload)
         telegram_bot.send_message(message.chat.id, "🔊 Buzzer has been *UNMUTED*", parse_mode="Markdown")
@@ -574,7 +581,7 @@ def api_status():
 @app.route("/api/command", methods=["POST"])
 def api_command():
     """Receive system commands (arm, disarm, mute, unmute) from the dashboard and publish to MQTT."""
-    global system_armed
+    global system_armed, buzzer_muted_until
     
     data = request.json
     if not data or "action" not in data:
@@ -598,8 +605,10 @@ def api_command():
     elif action == "mute":
         duration = int(data.get("duration_sec", 60))
         payload = {"action": "mute", "duration_sec": duration}
+        buzzer_muted_until = time.time() + duration
     elif action == "unmute":
         payload = {"action": "unmute"}
+        buzzer_muted_until = 0
     else:
         return jsonify({"error": "Unknown action"}), 400
         
