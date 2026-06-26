@@ -215,16 +215,20 @@ def query_supabase_incidents(limit=100, classification=None, threat=None, alert_
     if hours:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = query.gte("created_at", since.isoformat())
-    return query.execute().data
+    try:
+        return query.execute().data
+    except Exception as exc:
+        print(f"[Supabase] Query failed: {exc}")
+        return None
 
 
 # ── MQTT callbacks ─────────────────────────────────────────────────────────────
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    if reason_code == 0:
         print(f"[MQTT] Connected to broker {MQTT_BROKER}:{MQTT_PORT}")
         client.subscribe("perimeter/#")
     else:
-        print(f"[MQTT] Connection failed, rc={rc}")
+        print(f"[MQTT] Connection failed, rc={reason_code}")
 
 
 def on_message(client, userdata, msg):
@@ -286,19 +290,21 @@ def on_message(client, userdata, msg):
 
 
 # ── MQTT client (background thread) ───────────────────────────────────────────
-mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqtt_client.on_connect = on_connect
 mqtt_client.on_message = on_message
 mqtt_client.reconnect_delay_set(min_delay=1, max_delay=10)
 
 
 def start_mqtt():
-    try:
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-        mqtt_client.loop_forever()
-    except Exception as exc:
-        print(f"[MQTT] Could not connect to {MQTT_BROKER}:{MQTT_PORT} — {exc}")
-        print("[MQTT] Retrying in background…")
+    while True:
+        try:
+            mqtt_client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
+            mqtt_client.loop_forever()
+        except Exception as exc:
+            print(f"[MQTT] Could not connect to {MQTT_BROKER}:{MQTT_PORT} — {exc}")
+            print("[MQTT] Retrying in 5 seconds…")
+            time.sleep(5)
 
 
 mqtt_thread = threading.Thread(target=start_mqtt, daemon=True)
@@ -426,5 +432,5 @@ def api_export_incidents_csv():
 
 if __name__ == "__main__":
     print(f"[SentinelMesh AI] Serving dashboard from: {FRONTEND_DIR}")
-    print("[SentinelMesh AI] Dashboard → http://localhost:5000")
+    print("[SentinelMesh AI] Dashboard -> http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
