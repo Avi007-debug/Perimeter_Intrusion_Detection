@@ -39,6 +39,11 @@ SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_KEY)
 supabase_client  = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_ENABLED else None
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "").strip()
+
+import google.generativeai as genai
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # ── State (thread-safe via lock) ───────────────────────────────────────────────
 lock             = threading.Lock()
@@ -507,6 +512,41 @@ def api_command():
         
     mqtt_client.publish("perimeter/command", json.dumps(payload))
     return jsonify({"status": "ok", "message": f"Command '{action}' published"})
+
+@app.route("/api/gemini/report", methods=["POST"])
+def api_gemini_report():
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "Gemini API key not configured"}), 500
+        
+    data = request.json
+    if not data:
+        with lock:
+            data = latest_incident
+            
+    if not data:
+        return jsonify({"error": "No incident data available."}), 400
+        
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        prompt = f"""
+        Write a professional, concise security incident report based on the following telemetry data.
+        The report should be exactly 2 paragraphs. Sound authoritative, like a security operations center (SOC) analyst.
+        Do not use markdown formatting like asterisks for bolding, just plain text.
+
+        Incident Data:
+        Classification: {data.get('classification', 'Unknown')}
+        Threat Level: {data.get('threat', 'Unknown')}
+        Confidence: {data.get('confidence', 0)}%
+        Path of Intrusion: {data.get('path', 'Unknown')}
+        Motion (PIR) nodes triggered: {data.get('pirCount', 0)}
+        Vibration nodes triggered: {data.get('vibCount', 0)}
+        Duration: {data.get('durationSec', 0)} seconds
+        Minimum Distance detected: {data.get('minDistance', 0)} cm
+        """
+        response = model.generate_content(prompt)
+        return jsonify({"report": response.text.strip()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/current")

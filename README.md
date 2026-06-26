@@ -2,19 +2,25 @@
 
 SentinelMesh AI is a real-time smart perimeter intrusion detection system powered by an ESP-NOW mesh network and AI classification. It uses ESP32 and ESP8266 microcontrollers with PIR and vibration sensors to detect, classify, and track perimeter breaches in real time.
 
-## Project Structure
+## 🌟 Key Features
+- **Remote Hardware Control:** Fully interactive control over physical alarms! You can globally **Arm, Disarm, and Mute** the hardware buzzer directly from the Web Dashboard or via the Telegram Bot (using the `/menu` command).
+- **Gemini AI Security Reports:** Integrated Google `gemini-2.5-flash` model to analyze telemetry and generate natural-language SOC (Security Operations Center) incident reports with a single click.
+- **Telegram Bot Alerts:** Real-time push notifications for HIGH/CRITICAL threats directly to your phone with built-in rate-limiting and mute options.
+- **Cloud Analytics:** Seamless background synchronization with Supabase for historical tracking, long-term analytics, and CSV dataset exporting for Machine Learning.
 
-- `frontend/`: Web dashboard (HTML/JS/CSS) visualizing real-time alerts, cloud analytics, and perimeter maps.
-- `backend/`: Flask-based MQTT Bridge & REST API. It listens to MQTT topics, logs data to a local CSV and a Supabase database, and serves the dashboard.
+## 📁 Project Structure
+
+- `frontend/`: Web dashboard (HTML/JS/CSS) visualizing real-time alerts, cloud analytics, perimeter maps, and hardware controls.
+- `backend/`: Flask-based MQTT Bridge & REST API. It listens to MQTT topics, proxies control commands, logs data to Supabase, and serves the dashboard.
 - `ESP32/` & `ESP8266/`: Microcontroller code for the sensor nodes and the gateway.
 
 ## 🆕 Recent Updates
-- **Dashboard CSV Export:** Added a direct "Export CSV" button for Phase 6 Machine Learning dataset collection.
-- **Asynchronous Storage:** Moved Supabase uploads to a background thread to prevent the MQTT client from blocking and dropping incident packets.
-- **Improved Alert Level Distribution:** Completely rewrote the alert level logic. Normal motion scales slowly (Level 1 -> 2), but severe tampering (Vibration + close proximity) or wide-area intrusions (3+ nodes) instantly trigger the Level 3 solid alarm.
-- **Responsive Vehicle Tracking:** Relaxed the `avgMoveTime` for Vehicle classification to `3.0s` and reduced `PATH_TIMEOUT_MS` to `4000ms` for snappier real-time dashboard updates during live demos.
-- **Interactive Telegram Bot:** Added `pyTelegramBotAPI` integration. Alerts now include inline buttons to temporarily mute the physical hardware buzzer.
+- **Gemini AI Reports (Phase 7):** Integrated `google-generativeai` to generate beautiful, natural-language incident reports directly on the dashboard.
+- **Web Dashboard Controls:** Overhauled the dashboard into 3 tabs (Live Surveillance, Analytics, Controls) and added a dedicated System Controls panel to arm/disarm/mute the hardware via MQTT.
+- **Offline Node Detection:** Added a frontend health monitor that displays a massive red banner if the ESP32 gateway loses connection for >15 seconds.
+- **Interactive Telegram Bot:** Upgraded `telebot` integration. Alerts include inline buttons to temporarily mute the buzzer, and you can type `/menu` to Arm/Disarm the system globally from Telegram.
 - **Telegram Rate Limiting:** Built-in rate limiter blocks bursts of more than 15 alerts per minute, protecting against API bans.
+- **Asynchronous Storage & Data Export:** Supabase uploads run in background threads to avoid dropping MQTT messages. A "Export CSV" button allows downloading data for ML training.
 
 ---
 
@@ -131,7 +137,6 @@ We have successfully implemented Phases 1 through 4 (Supabase Storage, Analytics
 - Output: Classified label (Human, Animal, Vehicle).
 - Compare the ML accuracy vs. the current Rule Engine accuracy.
 
-**Phase 7: Gemini AI Integration (Generative Reports)**
+**Phase 7: Gemini AI Integration (Generative Reports) [✅ COMPLETED]**
 - Pass the classified ML incident data to the Gemini API to generate human-readable incident summaries.
-- e.g., *"A human-sized intrusion traversed three perimeter zones within a short time interval. The event was classified as HIGH threat because multiple nodes were activated in sequence."*
-- Useful for daily security reports and detailed incident logging.
+- The dashboard now features a one-click Generate AI Report button leveraging `gemini-2.5-flash` for instant incident logging.

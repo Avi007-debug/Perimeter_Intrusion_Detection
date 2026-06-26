@@ -1105,26 +1105,27 @@ if(eastActive && !prevEastActive)
 
     if(currentAlertLevel == 1)
     {
+      // Slow beeping
       if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
-      delay(200);
-
+      delay(500);
       digitalWrite(BUZZER, LOW);
-      delay(200);
+      delay(500);
     }
     else if(currentAlertLevel == 2)
     {
-      // Fast triple-beep for level 2 — clearly audible & urgent
-      for(int b = 0; b < 5; b++)
+      // Burst beeping
+      for(int b = 0; b < 3; b++)
       {
         if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
-        delay(40);
+        delay(80);
         digitalWrite(BUZZER, LOW);
-        delay(40);
+        delay(80);
       }
-      delay(150);   // pause between bursts
+      delay(200);
     }
     else if(currentAlertLevel == 3)
     {
+      // Continuous
       if(millis() > buzzerMutedUntil) digitalWrite(BUZZER, HIGH);
     }
   }
