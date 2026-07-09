@@ -332,20 +332,25 @@ def send_telegram_alert(data: dict):
     if not telegram_bot or not TELEGRAM_CHAT_ID:
         return
     
+    # 1. Respect the mute state
+    if time.time() < buzzer_muted_until:
+        return
+    
     threat = (data.get("threat") or "UNKNOWN").upper()
     if threat not in ["HIGH", "CRITICAL"]:
         return
         
-    # Rate limiter: max 15 alerts per 60 seconds
+    # 2. Rate limiter: max 15 alerts per 60 seconds (thread-safe)
     now = time.time()
-    while alert_timestamps and now - alert_timestamps[0] > 60:
-        alert_timestamps.popleft()
-        
-    if len(alert_timestamps) >= 15:
-        print("[Telegram] Rate limit exceeded, dropping alert.")
-        return
-        
-    alert_timestamps.append(now)
+    with lock:
+        while alert_timestamps and now - alert_timestamps[0] > 60:
+            alert_timestamps.popleft()
+            
+        if len(alert_timestamps) >= 15:
+            print("[Telegram] Rate limit exceeded, dropping alert.")
+            return
+            
+        alert_timestamps.append(now)
         
     classification = data.get("classification", "UNKNOWN")
     confidence = data.get("confidence", "?")

@@ -1,0 +1,8 @@
+sc query mosquitto
+net stop mosquitto
+32>netstat -ano | findstr :1883
+  TCP    0.0.0.0:1883           0.0.0.0:0              LISTENING       10764
+  TCP    10.69.186.189:1883     10.69.186.22:59737     ESTABLISHED     10764
+  TCP    [::]:1883              [::]:0                 LISTENING       10764
+
+  mosquitto -c "C:\Program Files\Mosquitto\perimeter.conf" -v

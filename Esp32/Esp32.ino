@@ -6,7 +6,7 @@
 // ── MQTT / WiFi credentials ──────────────────────────────────────
 const char* WIFI_SSID     = "Avi's Nord 5G";
 const char* WIFI_PASSWORD = "Avi@9322564784";
-const char* MQTT_BROKER   = "10.69.186.189";  
+const char* MQTT_BROKER   = "10.165.218.189";  
 const int   MQTT_PORT     = 1883;
 
 WiFiClient   wifiClient;
