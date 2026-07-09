@@ -239,6 +239,11 @@ def on_connect(client, userdata, flags, reason_code, properties=None):
     if reason_code == 0:
         print(f"[MQTT] Connected to broker {MQTT_BROKER}:{MQTT_PORT}")
         client.subscribe("perimeter/#")
+        
+        # Auto-refresh ESP32 to normal working state (Armed & Unmuted) on startup/reconnect
+        client.publish("perimeter/command", json.dumps({"action": "arm"}))
+        client.publish("perimeter/command", json.dumps({"action": "unmute"}))
+        print("[MQTT] Sent auto-refresh commands to nodes: ARM, UNMUTE")
     else:
         print(f"[MQTT] Connection failed, rc={reason_code}")
 
